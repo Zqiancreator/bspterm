@@ -8,7 +8,7 @@ use terminal::{
     Abbreviation, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
 };
 use uuid::Uuid;
-use ui::{FluentBuilder, IconButton, IconName, IconSize, Label, Switch, ToggleState, prelude::*};
+use ui::{FluentBuilder, IconButton, IconName, IconSize, Label, Switch, TintColor, ToggleState, prelude::*};
 use workspace::ModalView;
 
 /// Configuration modal for the abbreviation bar.
@@ -194,7 +194,7 @@ fn protocol_button(
 
     ui::Button::new(SharedString::from(id.to_string()), label)
         .style(if is_selected {
-            ui::ButtonStyle::Filled
+            ui::ButtonStyle::Tinted(TintColor::Accent)
         } else {
             ui::ButtonStyle::Subtle
         })
@@ -215,7 +215,7 @@ fn edit_protocol_button(
 
     ui::Button::new(SharedString::from(id.to_string()), label)
         .style(if is_selected {
-            ui::ButtonStyle::Filled
+            ui::ButtonStyle::Tinted(TintColor::Accent)
         } else {
             ui::ButtonStyle::Subtle
         })

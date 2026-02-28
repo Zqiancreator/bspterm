@@ -490,6 +490,41 @@ impl ShortcutBarStoreEntity {
         cx.notify();
     }
 
+    /// Update a script shortcut.
+    pub fn update_script_shortcut<F>(&mut self, id: Uuid, f: F, cx: &mut Context<Self>)
+    where
+        F: FnOnce(&mut ScriptShortcut),
+    {
+        if let Some(shortcut) = self.config.find_script_shortcut_mut(id) {
+            let old_keybinding = shortcut.keybinding.clone();
+            let old_protocol = shortcut.protocol.clone();
+            f(shortcut);
+            let new_keybinding = shortcut.keybinding.clone();
+            let new_protocol = shortcut.protocol.clone();
+
+            if old_keybinding != new_keybinding || old_protocol != new_protocol {
+                Self::unregister_keybinding_with_context(&old_keybinding, &old_protocol, cx);
+                Self::register_script_keybinding(shortcut, cx);
+            }
+
+            self.schedule_save(cx);
+            cx.emit(ShortcutBarStoreEvent::Changed);
+            cx.notify();
+        }
+    }
+
+    fn unregister_keybinding_with_context(
+        keybinding: &str,
+        protocol: &Option<AbbreviationProtocol>,
+        cx: &mut App,
+    ) {
+        if keybinding.is_empty() {
+            return;
+        }
+        let context_predicate = Self::build_context_predicate(protocol);
+        cx.bind_keys([KeyBinding::new(keybinding, gpui::NoAction {}, Some(context_predicate))]);
+    }
+
     /// Get all visible system shortcuts.
     pub fn visible_shortcuts(&self) -> &[VisibleShortcut] {
         &self.config.visible_shortcuts

@@ -3,6 +3,7 @@ pub mod dock;
 pub mod history_manager;
 pub mod invalid_item_view;
 pub mod item;
+mod keystroke_recording_indicator;
 mod modal_layer;
 pub mod notifications;
 pub mod pane;
@@ -100,6 +101,7 @@ use sqlez::{
     statement::Statement,
 };
 use status_bar::StatusBar;
+pub use keystroke_recording_indicator::KeystrokeRecordingIndicator;
 pub use status_bar::StatusItemView;
 use std::{
     any::TypeId,

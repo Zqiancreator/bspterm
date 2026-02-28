@@ -389,7 +389,9 @@ shortcut:
   show: "Show"
   hide: "Hide"
   delete: "Delete"
+  edit: "Edit"
   label: "Shortcuts"
+  script_name: "Script Name"
   shortcut_key: "Shortcut Key"
   shortcut_placeholder: "Shortcut key (e.g., ctrl-shift-1)"
   scope: "Scope"
@@ -400,6 +402,8 @@ shortcut:
   no_scripts_available: "No available scripts"
   new_shortcut_script: "New Shortcut Script"
   select_script: "Select Script"
+  click_to_record: "Click to record"
+  recording_hint: "Press keys (Enter to confirm)"
 
 # Welcome Page
 welcome:

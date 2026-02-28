@@ -15,8 +15,8 @@ use terminal::{
 
 use super::{DisconnectTerminal, ReconnectTerminal};
 use ui::{
-    Button, ButtonCommon, ButtonStyle, Color, IconButton, IconName, IconSize, ListItem,
-    ListItemSpacing, Switch, ToggleState, Tooltip, prelude::*,
+    Button, ButtonCommon, ButtonStyle, Color, IconButton, IconName, IconSize,
+    KeystrokeRecorder, ListItem, ListItemSpacing, Switch, TintColor, ToggleState, Tooltip, prelude::*,
 };
 use uuid::Uuid;
 use workspace::{ModalView, OpenOptions, Workspace};
@@ -209,6 +209,14 @@ impl ShortcutBarConfigModal {
             store.remove_script_shortcut(id, cx);
         });
     }
+
+    fn open_edit_modal_static(workspace: &WeakEntity<Workspace>, id: Uuid, window: &mut Window, cx: &mut App) {
+        workspace
+            .update(cx, |ws, cx| {
+                ws.toggle_modal(window, cx, |window, cx| EditShortcutModal::new(id, window, cx));
+            })
+            .ok();
+    }
 }
 
 impl Focusable for ShortcutBarConfigModal {
@@ -221,6 +229,7 @@ impl Render for ShortcutBarConfigModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let store = ShortcutBarStoreEntity::global(cx);
         let store_ref = store.read(cx);
+        let workspace = self.workspace.clone();
 
         let system_shortcuts = get_all_system_shortcuts(window);
         let script_shortcuts: Vec<_> = store_ref.script_shortcuts().to_vec();
@@ -367,6 +376,7 @@ impl Render for ShortcutBarConfigModal {
                                 .children(script_shortcuts.iter().enumerate().map(|(idx, shortcut)| {
                                     let is_hidden = shortcut.hidden;
                                     let shortcut_id = shortcut.id;
+                                    let workspace_for_edit = workspace.clone();
 
                                     h_flex()
                                         .id(SharedString::from(format!("script-shortcut-{}", idx)))
@@ -434,6 +444,18 @@ impl Render for ShortcutBarConfigModal {
                                                 )
                                                 .child(
                                                     IconButton::new(
+                                                        SharedString::from(format!("edit-script-{}", idx)),
+                                                        IconName::Pencil,
+                                                    )
+                                                    .icon_size(IconSize::Small)
+                                                    .icon_color(Color::Muted)
+                                                    .tooltip(Tooltip::text(t("shortcut.edit")))
+                                                    .on_click(move |_, window, cx| {
+                                                        Self::open_edit_modal_static(&workspace_for_edit, shortcut_id, window, cx);
+                                                    }),
+                                                )
+                                                .child(
+                                                    IconButton::new(
                                                         SharedString::from(format!("delete-script-{}", idx)),
                                                         IconName::Trash,
                                                     )
@@ -477,7 +499,7 @@ fn shortcut_protocol_button(
 
     Button::new(SharedString::from(id.to_string()), label)
         .style(if is_selected {
-            ButtonStyle::Filled
+            ButtonStyle::Tinted(TintColor::Accent)
         } else {
             ButtonStyle::Subtle
         })
@@ -492,7 +514,7 @@ pub struct AddShortcutModal {
     workspace: WeakEntity<Workspace>,
     mode: AddShortcutMode,
     label_editor: Entity<Editor>,
-    keybinding_editor: Entity<Editor>,
+    keybinding_recorder: Entity<KeystrokeRecorder>,
     selected_script: Option<PathBuf>,
     available_scripts: Vec<PathBuf>,
     selected_protocol: Option<AbbreviationProtocol>,
@@ -510,15 +532,11 @@ impl AddShortcutModal {
 
         let label_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text(&t("shortcut.label"), window, cx);
+            editor.set_placeholder_text(&t("shortcut.script_name"), window, cx);
             editor
         });
 
-        let keybinding_editor = cx.new(|cx| {
-            let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text(&t("shortcut.shortcut_placeholder"), window, cx);
-            editor
-        });
+        let keybinding_recorder = cx.new(|cx| KeystrokeRecorder::new(None, window, cx));
 
         let available_scripts = scan_scripts();
 
@@ -534,7 +552,7 @@ impl AddShortcutModal {
             workspace,
             mode: AddShortcutMode::SelectType,
             label_editor,
-            keybinding_editor,
+            keybinding_recorder,
             selected_script: None,
             available_scripts,
             selected_protocol: None,
@@ -558,8 +576,8 @@ impl AddShortcutModal {
         self.label_editor.update(cx, |editor, cx| {
             editor.set_text(String::new(), window, cx);
         });
-        self.keybinding_editor.update(cx, |editor, cx| {
-            editor.set_text(String::new(), window, cx);
+        self.keybinding_recorder.update(cx, |recorder, _cx| {
+            recorder.set_value(None);
         });
 
         cx.notify();
@@ -578,7 +596,11 @@ impl AddShortcutModal {
 
     fn create_new_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let label = self.label_editor.read(cx).text(cx).trim().to_string();
-        let keybinding = self.keybinding_editor.read(cx).text(cx).trim().to_string();
+        let keybinding = self
+            .keybinding_recorder
+            .read(cx)
+            .current_value()
+            .unwrap_or_default();
 
         if label.is_empty() {
             return;
@@ -645,7 +667,11 @@ if __name__ == "__main__":
         };
 
         let label = self.label_editor.read(cx).text(cx).trim().to_string();
-        let keybinding = self.keybinding_editor.read(cx).text(cx).trim().to_string();
+        let keybinding = self
+            .keybinding_recorder
+            .read(cx)
+            .current_value()
+            .unwrap_or_default();
 
         if label.is_empty() {
             return;
@@ -698,7 +724,7 @@ if __name__ == "__main__":
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.label")))
+                    .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.script_name")))
                     .child(
                         div()
                             .w_full()
@@ -714,16 +740,7 @@ if __name__ == "__main__":
                 v_flex()
                     .gap_1()
                     .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.shortcut_key")))
-                    .child(
-                        div()
-                            .w_full()
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .child(self.keybinding_editor.clone()),
-                    ),
+                    .child(self.keybinding_recorder.clone()),
             )
             .child(
                 v_flex()
@@ -821,7 +838,7 @@ if __name__ == "__main__":
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.label")))
+                    .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.script_name")))
                     .child(
                         div()
                             .w_full()
@@ -837,16 +854,7 @@ if __name__ == "__main__":
                 v_flex()
                     .gap_1()
                     .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(t("shortcut.shortcut_key")))
-                    .child(
-                        div()
-                            .w_full()
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .child(self.keybinding_editor.clone()),
-                    ),
+                    .child(self.keybinding_recorder.clone()),
             )
             .child(
                 v_flex()
@@ -946,5 +954,257 @@ impl Render for AddShortcutModal {
                     self.render_select_existing(cx).into_any_element()
                 }
             })
+    }
+}
+
+fn edit_shortcut_protocol_button(
+    id: &str,
+    protocol: Option<AbbreviationProtocol>,
+    current: &Option<AbbreviationProtocol>,
+    cx: &mut Context<EditShortcutModal>,
+) -> impl IntoElement {
+    let is_selected = &protocol == current;
+    let label = match &protocol {
+        None => t("shortcut.scope_all"),
+        Some(AbbreviationProtocol::All) => t("shortcut.scope_all"),
+        Some(AbbreviationProtocol::Ssh) => "SSH".into(),
+        Some(AbbreviationProtocol::Telnet) => "Telnet".into(),
+    };
+
+    Button::new(SharedString::from(id.to_string()), label)
+        .style(if is_selected {
+            ButtonStyle::Tinted(TintColor::Accent)
+        } else {
+            ButtonStyle::Subtle
+        })
+        .on_click(cx.listener(move |this, _, _window, cx| {
+            this.set_protocol(protocol.clone(), cx);
+        }))
+}
+
+/// Modal for editing an existing script shortcut.
+pub struct EditShortcutModal {
+    focus_handle: FocusHandle,
+    shortcut_id: Uuid,
+    label_editor: Entity<Editor>,
+    keybinding_recorder: Entity<KeystrokeRecorder>,
+    selected_protocol: Option<AbbreviationProtocol>,
+    _subscription: Subscription,
+}
+
+impl ModalView for EditShortcutModal {}
+
+impl EventEmitter<DismissEvent> for EditShortcutModal {}
+
+impl EditShortcutModal {
+    pub fn new(shortcut_id: Uuid, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
+
+        let store = ShortcutBarStoreEntity::global(cx);
+        let shortcut = store.read(cx).find_script_shortcut(shortcut_id);
+
+        let (label_text, keybinding_text, protocol) = shortcut
+            .map(|s| (s.label.clone(), s.keybinding.clone(), s.protocol.clone()))
+            .unwrap_or_default();
+
+        let label_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text(label_text, window, cx);
+            editor
+        });
+
+        let keybinding_recorder = cx.new(|cx| {
+            KeystrokeRecorder::new(
+                if keybinding_text.is_empty() {
+                    None
+                } else {
+                    Some(keybinding_text)
+                },
+                window,
+                cx,
+            )
+        });
+
+        let subscription = cx.subscribe(
+            &ShortcutBarStoreEntity::global(cx),
+            |_this, _, _event: &ShortcutBarStoreEvent, cx| {
+                cx.notify();
+            },
+        );
+
+        Self {
+            focus_handle,
+            shortcut_id,
+            label_editor,
+            keybinding_recorder,
+            selected_protocol: protocol,
+            _subscription: subscription,
+        }
+    }
+
+    fn dismiss(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn set_protocol(&mut self, protocol: Option<AbbreviationProtocol>, cx: &mut Context<Self>) {
+        self.selected_protocol = protocol;
+        cx.notify();
+    }
+
+    fn save_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let label = self.label_editor.read(cx).text(cx).trim().to_string();
+        let keybinding = self
+            .keybinding_recorder
+            .read(cx)
+            .current_value()
+            .unwrap_or_default();
+
+        if label.is_empty() {
+            return;
+        }
+
+        let protocol = self.selected_protocol.clone();
+        let shortcut_id = self.shortcut_id;
+
+        if let Some(store) = ShortcutBarStoreEntity::try_global(cx) {
+            store.update(cx, |store, cx| {
+                store.update_script_shortcut(
+                    shortcut_id,
+                    move |shortcut| {
+                        shortcut.label = label;
+                        shortcut.keybinding = keybinding;
+                        shortcut.protocol = protocol;
+                    },
+                    cx,
+                );
+            });
+        }
+
+        self.dismiss(window, cx);
+    }
+}
+
+impl Focusable for EditShortcutModal {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for EditShortcutModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id("edit-shortcut-modal")
+            .elevation_3(cx)
+            .p_3()
+            .gap_3()
+            .w(px(360.0))
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
+                this.dismiss(window, cx);
+            }))
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(t("shortcut.edit")),
+                    )
+                    .child(
+                        IconButton::new("close-modal", IconName::Close)
+                            .icon_size(IconSize::Small)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss(window, cx);
+                            })),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(t("shortcut.script_name")),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .child(self.label_editor.clone()),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(t("shortcut.shortcut_key")),
+                            )
+                            .child(self.keybinding_recorder.clone()),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(t("shortcut.scope")),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(edit_shortcut_protocol_button(
+                                        "edit-protocol-all",
+                                        None,
+                                        &self.selected_protocol,
+                                        cx,
+                                    ))
+                                    .child(edit_shortcut_protocol_button(
+                                        "edit-protocol-ssh",
+                                        Some(AbbreviationProtocol::Ssh),
+                                        &self.selected_protocol,
+                                        cx,
+                                    ))
+                                    .child(edit_shortcut_protocol_button(
+                                        "edit-protocol-telnet",
+                                        Some(AbbreviationProtocol::Telnet),
+                                        &self.selected_protocol,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .justify_end()
+                            .child(
+                                Button::new("cancel-btn", t("common.cancel"))
+                                    .style(ButtonStyle::Subtle)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.dismiss(window, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("save-btn", t("common.save"))
+                                    .style(ButtonStyle::Filled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_changes(window, cx);
+                                    })),
+                            ),
+                    ),
+            )
     }
 }

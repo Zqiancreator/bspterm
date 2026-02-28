@@ -57,8 +57,8 @@ use terminal_path_like_target::{hover_path_like_target, open_path_like_target};
 use terminal_scrollbar::TerminalScrollHandle;
 use terminal_slash_command::TerminalSlashCommand;
 use ui::{
-    ContextMenu, Divider, ScrollAxes, Scrollbars, Switch, ToggleState, Tooltip, WithScrollbar,
-    prelude::*,
+    ContextMenu, Divider, KeystrokeRecordingState, ScrollAxes, Scrollbars, Switch, ToggleState,
+    Tooltip, WithScrollbar, prelude::*,
     scrollbars::{self, GlobalSetting, ScrollbarVisibility},
 };
 use i18n::t;
@@ -89,7 +89,7 @@ use bspterm_actions::{
 };
 use abbr_bar::{AbbrBarConfigModal, AddAbbrModal, EditAbbrModal};
 use button_bar::ButtonBarScriptRunner;
-use shortcut_bar::{AddShortcutModal, ShortcutBarConfigModal};
+use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     get_action_label, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
     ButtonBarStoreEntity, ButtonBarStoreEvent, ShortcutBarStoreEntity, ShortcutBarStoreEvent,
@@ -191,6 +191,7 @@ pub fn init(cx: &mut App) {
     AbbreviationStoreEntity::init(cx);
     ShortcutBarStoreEntity::init(cx);
     HighlightStoreEntity::init(cx);
+    KeystrokeRecordingState::init(cx);
 
     fn ensure_session_log_directory(cx: &App) {
         let settings = TerminalSettings::get_global(cx);
@@ -1860,6 +1861,7 @@ print(output)
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let workspace = self.workspace.clone();
         let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
             match shortcut_info {
                 ShortcutContextInfo::System { keybinding, action_type } => {
@@ -1877,7 +1879,21 @@ print(output)
                         )
                 }
                 ShortcutContextInfo::Script { id } => {
+                    let workspace_for_edit = workspace.clone();
                     menu.context(self.focus_handle.clone())
+                        .entry(
+                            t("shortcut.edit"),
+                            None,
+                            move |window, cx| {
+                                workspace_for_edit
+                                    .update(cx, |ws, cx| {
+                                        ws.toggle_modal(window, cx, |window, cx| {
+                                            EditShortcutModal::new(id, window, cx)
+                                        });
+                                    })
+                                    .ok();
+                            },
+                        )
                         .entry(
                             t("shortcut.hide"),
                             None,
@@ -1928,13 +1944,21 @@ print(output)
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let workspace = self.workspace.clone();
         let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
             menu.context(self.focus_handle.clone())
                 .entry(
                     t("shortcut.add_script_shortcut"),
                     None,
-                    |window, cx| {
-                        window.dispatch_action(Box::new(ConfigureShortcutBar), cx);
+                    move |window, cx| {
+                        let workspace_clone = workspace.clone();
+                        workspace
+                            .update(cx, |ws, cx| {
+                                ws.toggle_modal(window, cx, |window, cx| {
+                                    AddShortcutModal::new(workspace_clone, window, cx)
+                                });
+                            })
+                            .ok();
                     },
                 )
         });
@@ -3064,7 +3088,7 @@ impl TerminalView {
 
         let settings = TerminalSettings::get_global(cx);
 
-        if self.should_skip_shell(&event.keystroke, &settings, &event.context_stack, cx) {
+        if self.should_skip_shell(&event.keystroke, &settings, &event.context_stack, window, cx) {
             return;
         }
 
@@ -3088,6 +3112,7 @@ impl TerminalView {
         keystroke: &Keystroke,
         settings: &TerminalSettings,
         context_stack: &[KeyContext],
+        window: &Window,
         cx: &App,
     ) -> bool {
         // 1. Check explicit keybindings_to_skip_shell list (backwards compatibility)
@@ -3101,7 +3126,7 @@ impl TerminalView {
         }
 
         // 2. Check if keystroke has a Terminal-context keybinding (NOT SendKeystroke/SendText)
-        Self::keystroke_has_zed_action_binding(keystroke, context_stack, cx)
+        Self::keystroke_has_zed_action_binding(keystroke, context_stack, window, cx)
     }
 
     /// Check if a keystroke has a Terminal-context keybinding that should NOT be sent to shell.
@@ -3109,13 +3134,24 @@ impl TerminalView {
     fn keystroke_has_zed_action_binding(
         keystroke: &Keystroke,
         context_stack: &[KeyContext],
+        window: &Window,
         cx: &App,
     ) -> bool {
         let keymap = cx.key_bindings();
         let keymap = keymap.borrow();
 
-        let (bindings, _pending) =
-            keymap.bindings_for_input(std::slice::from_ref(keystroke), context_stack);
+        let mut all_keystrokes: Vec<Keystroke> = window
+            .pending_input_keystrokes()
+            .map(|ks| ks.to_vec())
+            .unwrap_or_default();
+        all_keystrokes.push(keystroke.clone());
+
+        let (bindings, pending) = keymap.bindings_for_input(&all_keystrokes, context_stack);
+
+        // If there's a pending multi-keystroke sequence, intercept to let GPUI wait for more keys
+        if pending {
+            return true;
+        }
 
         for binding in bindings {
             let action_name = binding.action().name();
