@@ -41,6 +41,37 @@ script/linux
 ./script/install-linux
 ```
 
+## CPU Resource Limiting
+
+为避免编译占满系统资源，所有 cargo 编译相关命令都应限制并行任务数：
+
+**Build with CPU limit:**
+```sh
+cargo build -j 9
+```
+
+**Check with CPU limit:**
+```sh
+cargo check -j 9
+```
+
+**Test with CPU limit:**
+```sh
+cargo test --workspace -j 9
+```
+
+**Run with CPU limit:**
+```sh
+cargo run -j 9
+```
+
+也可以通过环境变量全局设置：
+```sh
+export CARGO_BUILD_JOBS=9
+```
+
+注意：系统有 12 核，`-j 9` 使用 75% 核心，保留 3 核给系统和其他应用。
+
 ## High-Level Architecture
 
 This is a fork of [Zed](https://github.com/zed-industries/zed), a GPU-accelerated code editor. Key crates:
