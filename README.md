@@ -12,7 +12,27 @@
 
 ## 安装
 
-### Linux
+### 从 GitHub Release 下载
+
+从 [Releases](https://github.com/tu10ng/wirsterm/releases) 下载最新版本：
+
+| 文件 | 说明 |
+|------|------|
+| `bspterm-linux-x86_64.tar.gz` | Linux 二进制文件 |
+| `bspterm-windows-x86_64.zip` | Windows 二进制文件 |
+| `bspterm-config.zip` | 默认配置文件和示例脚本 |
+
+**bspterm-config.zip 包含：**
+- `settings/default_terminal_rules.json` - 终端自动化规则（自动登录等）
+- `settings/default_highlight_rules.json` - 语义高亮规则（错误/警告/IP/URL 等）
+- `scripts/bspterm.py` - Python 脚本客户端库
+- `scripts/API.md` - Python 脚本 API 文档
+- `scripts/device_online_notify.py` - 示例：设备上线通知脚本
+- `scripts/ne5000e_mpu_collector.py` - 示例：NE5000E MPU 数据采集脚本
+
+配置文件放置位置：`~/.config/bspterm/`
+
+### Linux 本地安装
 ```sh
 ./script/install-linux
 ```
