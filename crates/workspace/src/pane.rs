@@ -2784,8 +2784,17 @@ impl Pane {
 
         let has_file_icon = icon.is_some() | decorated_icon.is_some();
 
+        let led_element: Option<Div> = item.tab_led_color(cx).map(|color| {
+            div()
+                .w(px(2.))
+                .h_full()
+                .flex_shrink_0()
+                .bg(color.color(cx))
+        });
+
         let capability = item.capability(cx);
         let tab = Tab::new(ix)
+            .led_slot::<Div>(led_element)
             .position(if wrap_tabs {
                 TabPosition::Middle(CmpOrdering::Equal)
             } else if is_first_item {

@@ -243,6 +243,8 @@ pub struct TerminalView {
     focus_handle: FocusHandle,
     //Currently using iTerm bell, show bell emoji in tab until input is received
     has_bell: bool,
+    /// Track new output while terminal is unfocused (for blue LED indicator)
+    has_new_output: bool,
     context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
     cursor_shape: CursorShape,
     blink_manager: Entity<BlinkManager>,
@@ -456,6 +458,7 @@ impl TerminalView {
             workspace: workspace_handle,
             project,
             has_bell: false,
+            has_new_output: false,
             focus_handle,
             context_menu: None,
             cursor_shape,
@@ -2870,6 +2873,9 @@ fn subscribe_for_terminal_events(
 
             match event {
                 Event::Wakeup => {
+                    if !terminal_view.focus_handle.is_focused(window) {
+                        terminal_view.has_new_output = true;
+                    }
                     cx.notify();
                     cx.emit(Event::Wakeup);
                     cx.emit(ItemEvent::UpdateTab);
@@ -3203,6 +3209,11 @@ impl TerminalView {
     }
 
     fn focus_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_new_output {
+            self.has_new_output = false;
+            cx.emit(ItemEvent::UpdateTab);
+        }
+
         self.terminal.update(cx, |terminal, _| {
             terminal.set_cursor_shape(self.cursor_shape);
             terminal.focus_in();
@@ -3491,32 +3502,35 @@ impl Item for TerminalView {
                 }
             });
 
-        let (icon, icon_color, rerun_button) = if is_disconnected {
-            (IconName::Disconnected, Color::Warning, None)
-        } else {
-            match terminal.task() {
-                Some(terminal_task) => match &terminal_task.status {
-                    TaskStatus::Running => (
-                        IconName::PlayFilled,
-                        Color::Disabled,
-                        TerminalView::rerun_button(terminal_task),
-                    ),
-                    TaskStatus::Unknown => (
-                        IconName::Warning,
-                        Color::Warning,
-                        TerminalView::rerun_button(terminal_task),
-                    ),
-                    TaskStatus::Completed { success } => {
-                        let rerun_button = TerminalView::rerun_button(terminal_task);
+        let (icon, icon_color, rerun_button) = match terminal.task() {
+            Some(terminal_task) => match &terminal_task.status {
+                TaskStatus::Running => (
+                    IconName::PlayFilled,
+                    Color::Disabled,
+                    TerminalView::rerun_button(terminal_task),
+                ),
+                TaskStatus::Unknown => (
+                    IconName::Warning,
+                    Color::Warning,
+                    TerminalView::rerun_button(terminal_task),
+                ),
+                TaskStatus::Completed { success } => {
+                    let rerun_button = TerminalView::rerun_button(terminal_task);
 
-                        if *success {
-                            (IconName::Check, Color::Success, rerun_button)
-                        } else {
-                            (IconName::XCircle, Color::Error, rerun_button)
-                        }
+                    if *success {
+                        (IconName::Check, Color::Success, rerun_button)
+                    } else {
+                        (IconName::XCircle, Color::Error, rerun_button)
                     }
-                },
-                None => (IconName::Terminal, Color::Muted, None),
+                }
+            },
+            None => {
+                let icon = match terminal.connection_info() {
+                    Some(terminal::ConnectionInfo::Ssh { .. }) => IconName::LetterS,
+                    Some(terminal::ConnectionInfo::Telnet { .. }) => IconName::LetterT,
+                    None => IconName::Terminal,
+                };
+                (icon, Color::Muted, None)
             }
         };
 
@@ -3586,6 +3600,24 @@ impl Item for TerminalView {
         }
         let terminal = self.terminal().read(cx);
         terminal.title(detail == 0).into()
+    }
+
+    fn tab_led_color(&self, cx: &App) -> Option<Color> {
+        let terminal = self.terminal().read(cx);
+
+        // Only show LED for SSH/Telnet connections
+        if terminal.connection_info().is_none() {
+            return None;
+        }
+
+        // Priority: disconnected -> has_new_output -> connected
+        if terminal.is_disconnected() {
+            Some(Color::Error)
+        } else if self.has_new_output {
+            Some(Color::Info)
+        } else {
+            Some(Color::Success)
+        }
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {

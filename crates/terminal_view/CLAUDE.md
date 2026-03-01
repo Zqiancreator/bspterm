@@ -58,6 +58,23 @@ src/
 1. Add to `button_bar.rs` or `shortcut_bar.rs`
 2. Implement click handler
 
+## Tab LED Indicator
+
+SSH/Telnet terminal tabs display a colored LED indicator showing connection status:
+
+| Color | Condition | Field |
+|-------|-----------|-------|
+| Green (`Color::Success`) | Connected, no new output | Default state |
+| Blue (`Color::Info`) | New output while unfocused | `has_new_output` |
+| Red (`Color::Error`) | Disconnected | `terminal.is_disconnected()` |
+
+**Implementation** (`terminal_view.rs`):
+- `has_new_output`: Set to `true` in `Event::Wakeup` handler when terminal is not focused
+- Cleared in `focus_in()` when user switches back to the terminal tab
+- `tab_led_color()`: Returns LED color based on priority (disconnected > new_output > connected)
+
+Local terminals (no `connection_info`) do not display an LED.
+
 ## Testing
 
 ```sh

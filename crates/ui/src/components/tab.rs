@@ -35,6 +35,7 @@ pub struct Tab {
     selected: bool,
     position: TabPosition,
     close_side: TabCloseSide,
+    led_slot: Option<AnyElement>,
     start_slot: Option<AnyElement>,
     end_slot: Option<AnyElement>,
     children: SmallVec<[AnyElement; 2]>,
@@ -52,6 +53,7 @@ impl Tab {
             selected: false,
             position: TabPosition::First,
             close_side: TabCloseSide::End,
+            led_slot: None,
             start_slot: None,
             end_slot: None,
             children: SmallVec::new(),
@@ -77,6 +79,11 @@ impl Tab {
 
     pub fn close_side(mut self, close_side: TabCloseSide) -> Self {
         self.close_side = close_side;
+        self
+    }
+
+    pub fn led_slot<E: IntoElement>(mut self, element: impl Into<Option<E>>) -> Self {
+        self.led_slot = element.into().map(IntoElement::into_any_element);
         self
     }
 
@@ -186,6 +193,7 @@ impl RenderOnce for Tab {
                     .group("")
                     .relative()
                     .h(Tab::content_height(cx))
+                    .children(self.led_slot)
                     .px(DynamicSpacing::Base04.px(cx))
                     .gap(DynamicSpacing::Base04.rems(cx))
                     .text_color(text_color)
