@@ -1005,57 +1005,20 @@
     "context": "Terminal",
     "use_key_equivalents": true,
     "bindings": {
-      "ctrl-cmd-space": "terminal::ShowCharacterPalette",
       "cmd-c": "terminal::Copy",
       "cmd-v": "terminal::Paste",
       "cmd-f": "buffer_search::Deploy",
-      "cmd-a": "editor::SelectAll",
-      "cmd-k": "terminal::Clear",
-      "cmd-n": "workspace::NewTerminal",
-      "ctrl-enter": "assistant::InlineAssist",
-      "ctrl-_": null, // emacs undo
-      // Some nice conveniences
-      "cmd-backspace": ["terminal::SendText", "\u0015"], // ctrl-u: clear line
-      "alt-delete": ["terminal::SendText", "\u001bd"], // alt-d: delete word forward
-      "cmd-delete": ["terminal::SendText", "\u000b"], // ctrl-k: delete to end of line
-      "cmd-right": ["terminal::SendText", "\u0005"],
-      "cmd-left": ["terminal::SendText", "\u0001"],
-      // Terminal.app compatibility
-      "alt-left": ["terminal::SendText", "\u001bb"],
-      "alt-right": ["terminal::SendText", "\u001bf"],
       "alt-b": ["terminal::SendText", "\u001bb"],
       "alt-f": ["terminal::SendText", "\u001bf"],
       "ctrl-delete": ["terminal::SendText", "\u001bd"],
-      // There are conflicting bindings for these keys in the global context.
-      // these bindings override them, remove at your own risk:
+      // Overrides for conflicting keybindings
+      "ctrl-c": ["terminal::SendKeystroke", "ctrl-c"],
       "up": ["terminal::SendKeystroke", "up"],
       "pageup": ["terminal::SendKeystroke", "pageup"],
       "down": ["terminal::SendKeystroke", "down"],
       "pagedown": ["terminal::SendKeystroke", "pagedown"],
       "escape": ["terminal::SendKeystroke", "escape"],
       "enter": ["terminal::SendKeystroke", "enter"],
-      "ctrl-c": ["terminal::SendKeystroke", "ctrl-c"],
-      "ctrl-backspace": ["terminal::SendKeystroke", "ctrl-w"],
-      "shift-pageup": "terminal::ScrollPageUp",
-      "cmd-up": "terminal::ScrollPageUp",
-      "shift-pagedown": "terminal::ScrollPageDown",
-      "cmd-down": "terminal::ScrollPageDown",
-      "shift-up": "terminal::ScrollLineUp",
-      "shift-down": "terminal::ScrollLineDown",
-      "shift-home": "terminal::ScrollToTop",
-      "cmd-home": "terminal::ScrollToTop",
-      "shift-end": "terminal::ScrollToBottom",
-      "cmd-end": "terminal::ScrollToBottom",
-      // Using `ctrl-shift-space` in Zed requires disabling the macOS global shortcut.
-      // System Preferences->Keyboard->Keyboard Shortcuts->Input Sources->Select the previous input source (uncheck)
-      "ctrl-shift-space": "terminal::ToggleViMode",
-      "ctrl-alt-up": "pane::SplitUp",
-      "ctrl-alt-down": "pane::SplitDown",
-      "ctrl-alt-left": "pane::SplitLeft",
-      "ctrl-alt-right": "pane::SplitRight",
-      "cmd-d": "pane::SplitRight",
-      "cmd-alt-r": "terminal::RerunTask",
-      "cmd->": "agent::AddSelectionToThread",
     },
   },
   {
