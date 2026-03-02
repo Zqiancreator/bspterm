@@ -1,4 +1,6 @@
-use super::{CallEdge, CallGraph, CallGraphNode};
+use super::CallGraph;
+#[cfg(test)]
+use super::{CallEdge, CallGraphNode};
 use crate::Trace;
 
 pub fn merge_graphs(graphs: Vec<CallGraph>) -> CallGraph {

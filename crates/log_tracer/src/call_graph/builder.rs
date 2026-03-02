@@ -44,14 +44,11 @@ impl CallGraphBuilder {
     }
 
     fn add_span_to_graph(&self, graph: &mut CallGraph, span: &Span) {
-        if graph.get_node_index(&span.operation_name).is_some() {
-            if let Some(node) = graph.get_node(&span.operation_name).cloned() {
-                let idx = graph.get_node_index(&span.operation_name).unwrap();
-                if let Some(node_ref) = graph.graph.node_weight_mut(idx) {
-                    node_ref.increment_count();
-                    if let Some(duration) = span.duration {
-                        node_ref.add_duration(duration);
-                    }
+        if let Some(idx) = graph.get_node_index(&span.operation_name) {
+            if let Some(node_ref) = graph.graph.node_weight_mut(idx) {
+                node_ref.increment_count();
+                if let Some(duration) = span.duration {
+                    node_ref.add_duration(duration);
                 }
             }
         } else {
@@ -101,6 +98,7 @@ impl CallGraphBuilder {
     }
 }
 
+#[allow(dead_code)]
 pub struct IncrementalBuilder {
     graph: CallGraph,
     locations: HashMap<String, CodeLocation>,
@@ -108,6 +106,7 @@ pub struct IncrementalBuilder {
     last_span_name: Option<String>,
 }
 
+#[allow(dead_code)]
 impl IncrementalBuilder {
     pub fn new(trace: Trace) -> Self {
         Self {
