@@ -964,6 +964,14 @@ pub struct ThemeColorsContent {
     #[serde(rename = "terminal.ansi.dim_white")]
     pub terminal_ansi_dim_white: Option<String>,
 
+    /// Background color for active terminal tabs.
+    #[serde(rename = "terminal.tab.active_background")]
+    pub terminal_tab_active_background: Option<String>,
+
+    /// Color for terminal gutter separator lines.
+    #[serde(rename = "terminal.gutter.separator")]
+    pub terminal_gutter_separator: Option<String>,
+
     #[serde(rename = "link_text.hover")]
     pub link_text_hover: Option<String>,
 

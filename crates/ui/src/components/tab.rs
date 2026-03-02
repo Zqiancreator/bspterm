@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use gpui::{AnyElement, IntoElement, Stateful};
+use gpui::{AnyElement, Hsla, IntoElement, Stateful};
 use smallvec::SmallVec;
 
 use crate::prelude::*;
@@ -41,6 +41,7 @@ pub struct Tab {
     children: SmallVec<[AnyElement; 2]>,
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
+    custom_active_background: Option<Hsla>,
 }
 
 impl Tab {
@@ -59,7 +60,15 @@ impl Tab {
             children: SmallVec::new(),
             min_width: None,
             max_width: None,
+            custom_active_background: None,
         }
+    }
+
+    /// Sets a custom background color for the active state of the tab.
+    /// If set, this color overrides the theme's `tab_active_background` when selected.
+    pub fn active_background(mut self, color: impl Into<Option<Hsla>>) -> Self {
+        self.custom_active_background = color.into();
+        self
     }
 
     pub fn min_w_opt(mut self, width: impl Into<Option<Pixels>>) -> Self {
@@ -137,12 +146,17 @@ impl RenderOnce for Tab {
                 cx.theme().colors().ghost_element_hover,
                 cx.theme().colors().ghost_element_active,
             ),
-            true => (
-                cx.theme().colors().text,
-                cx.theme().colors().tab_active_background,
-                cx.theme().colors().element_hover,
-                cx.theme().colors().element_active,
-            ),
+            true => {
+                let active_bg = self
+                    .custom_active_background
+                    .unwrap_or_else(|| cx.theme().colors().tab_active_background);
+                (
+                    cx.theme().colors().text,
+                    active_bg,
+                    cx.theme().colors().element_hover,
+                    cx.theme().colors().element_active,
+                )
+            }
         };
 
         let (start_slot, end_slot) = {

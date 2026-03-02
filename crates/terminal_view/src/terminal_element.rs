@@ -1500,7 +1500,7 @@ impl Element for TerminalElement {
 
                     // Initialize row decorators
                     let mut painters: Vec<Box<dyn RowDecorator>> = vec![Box::new(
-                        TimestampGapDecorator::new(10, theme.colors().border),
+                        TimestampGapDecorator::new(10, theme.colors().terminal_gutter_separator),
                     )];
 
                     let (gutter_dims, gutter_entries) = Self::layout_gutter(

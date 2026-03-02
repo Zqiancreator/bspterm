@@ -712,6 +712,14 @@ pub fn theme_colors_refinement(
             .terminal_ansi_dim_white
             .as_ref()
             .and_then(|color| try_parse_color(color).ok()),
+        terminal_tab_active_background: this
+            .terminal_tab_active_background
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        terminal_gutter_separator: this
+            .terminal_gutter_separator
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
         link_text_hover: this
             .link_text_hover
             .as_ref()

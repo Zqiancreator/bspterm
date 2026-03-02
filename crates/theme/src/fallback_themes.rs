@@ -212,6 +212,8 @@ pub(crate) fn zed_default_dark() -> Theme {
                 terminal_ansi_dim_magenta: crate::violet().dark().step_9(),
                 terminal_ansi_dim_cyan: crate::cyan().dark().step_9(),
                 terminal_ansi_dim_white: crate::neutral().dark().step_10(),
+                terminal_tab_active_background: crate::indigo().dark().step_4(),
+                terminal_gutter_separator: crate::neutral().dark().step_6(),
                 panel_background: bg,
                 panel_focused_border: blue,
                 panel_indent_guide: hsla(228. / 360., 8. / 100., 25. / 100., 1.),

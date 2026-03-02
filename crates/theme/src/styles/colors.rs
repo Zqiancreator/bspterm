@@ -299,6 +299,10 @@ pub struct ThemeColors {
     pub terminal_ansi_bright_white: Hsla,
     /// Dim white ANSI terminal color.
     pub terminal_ansi_dim_white: Hsla,
+    /// Background color for active terminal tabs.
+    pub terminal_tab_active_background: Hsla,
+    /// Color for terminal gutter separator lines.
+    pub terminal_gutter_separator: Hsla,
 
     /// Represents a link text hover color.
     pub link_text_hover: Hsla,
@@ -432,6 +436,8 @@ pub enum ThemeColorField {
     TerminalAnsiWhite,
     TerminalAnsiBrightWhite,
     TerminalAnsiDimWhite,
+    TerminalTabActiveBackground,
+    TerminalGutterSeparator,
     LinkTextHover,
     VersionControlAdded,
     VersionControlDeleted,
@@ -558,6 +564,8 @@ impl ThemeColors {
             ThemeColorField::TerminalAnsiWhite => self.terminal_ansi_white,
             ThemeColorField::TerminalAnsiBrightWhite => self.terminal_ansi_bright_white,
             ThemeColorField::TerminalAnsiDimWhite => self.terminal_ansi_dim_white,
+            ThemeColorField::TerminalTabActiveBackground => self.terminal_tab_active_background,
+            ThemeColorField::TerminalGutterSeparator => self.terminal_gutter_separator,
             ThemeColorField::LinkTextHover => self.link_text_hover,
             ThemeColorField::VersionControlAdded => self.version_control_added,
             ThemeColorField::VersionControlDeleted => self.version_control_deleted,

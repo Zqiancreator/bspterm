@@ -3643,6 +3643,10 @@ impl Item for TerminalView {
         }
     }
 
+    fn tab_active_background(&self, cx: &App) -> Option<gpui::Hsla> {
+        Some(cx.theme().colors().terminal_tab_active_background)
+    }
+
     fn telemetry_event_text(&self) -> Option<&'static str> {
         None
     }

@@ -219,6 +219,13 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         None
     }
 
+    /// Returns the background color for the active tab.
+    /// Used by terminal tabs to show a distinct background color when active.
+    /// Returns None to use the default theme's tab_active_background color.
+    fn tab_active_background(&self, _cx: &App) -> Option<gpui::Hsla> {
+        None
+    }
+
     /// Returns the tab tooltip text.
     ///
     /// Use this if you don't need to customize the tab tooltip content.
@@ -497,6 +504,7 @@ pub trait ItemHandle: 'static + Send {
     fn suggested_filename(&self, cx: &App) -> SharedString;
     fn tab_icon(&self, window: &Window, cx: &App) -> Option<Icon>;
     fn tab_led_color(&self, cx: &App) -> Option<Color>;
+    fn tab_active_background(&self, cx: &App) -> Option<gpui::Hsla>;
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString>;
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent>;
     fn telemetry_event_text(&self, cx: &App) -> Option<&'static str>;
@@ -651,6 +659,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn tab_led_color(&self, cx: &App) -> Option<Color> {
         self.read(cx).tab_led_color(cx)
+    }
+
+    fn tab_active_background(&self, cx: &App) -> Option<gpui::Hsla> {
+        self.read(cx).tab_active_background(cx)
     }
 
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent> {
