@@ -278,6 +278,12 @@ pub fn highlight_rules_file() -> &'static PathBuf {
     HIGHLIGHT_RULES_FILE.get_or_init(|| config_dir().join("highlight_rules.json"))
 }
 
+/// Returns the path to the `recognize_config.json` file for auto-recognition configuration.
+pub fn recognize_config_file() -> &'static PathBuf {
+    static RECOGNIZE_CONFIG_FILE: OnceLock<PathBuf> = OnceLock::new();
+    RECOGNIZE_CONFIG_FILE.get_or_init(|| config_dir().join("recognize_config.json"))
+}
+
 /// Returns the path to the `code_server.json` file for SSH Docker code server configuration.
 pub fn code_server_file() -> &'static PathBuf {
     static CODE_SERVER_FILE: OnceLock<PathBuf> = OnceLock::new();

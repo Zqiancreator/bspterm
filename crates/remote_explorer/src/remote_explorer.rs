@@ -19,8 +19,8 @@ use i18n::t;
 use lan_discovery::{DiscoveredUser, LanDiscoveryEntity, LanDiscoveryEvent};
 use lan_messaging::{ChatModal, UserIdentity};
 use terminal::{
-    AuthMethod, ProtocolConfig, SessionConfig, SessionGroup, SessionNode, SessionStoreEntity,
-    SessionStoreEvent,
+    AuthMethod, ProtocolConfig, RecognizeConfigEntity, SessionConfig, SessionGroup, SessionNode,
+    SessionStoreEntity, SessionStoreEvent,
 };
 use ui::{
     prelude::*, Color, ContextMenu, Disclosure, Icon, IconName, IconSize, Indicator, Label,
@@ -91,6 +91,7 @@ fn collect_sessions_from_group(group: &SessionGroup) -> Vec<&SessionConfig> {
 
 pub fn init(cx: &mut App) {
     SessionStoreEntity::init(cx);
+    RecognizeConfigEntity::init(cx);
 
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {

@@ -17,6 +17,7 @@ src/
 ├── active_session_tracker.rs  # GPUI entity for active sessions
 ├── rule_store.rs         # Automation rule data model
 ├── rule_engine.rs        # Rule execution with regex matching
+├── recognize_config.rs   # Quick Add auto-recognition rules (embedded defaults)
 ├── abbr_store.rs         # Command abbreviations with protocol filtering
 ├── button_bar_config.rs  # Button bar configuration
 ├── shortcut_bar_store.rs # Keyboard/script shortcuts
@@ -41,6 +42,7 @@ src/
 | `SessionConfig` | SSH/Telnet configuration with auth methods |
 | `RuleStore` / `RuleEngine` | Automation rules with pattern matching |
 | `AutomationRule` | Trigger + condition + action definition |
+| `RecognizeConfig` / `RecognizeConfigEntity` | Quick Add auto-recognition rules with embedded defaults |
 | `AbbreviationStore` | Command abbreviations with protocol filtering |
 | `Event` | Terminal events (title changed, disconnected, login complete) |
 
@@ -79,3 +81,4 @@ cargo test -p terminal rule_engine  # Rule engine tests
 - Rule engine has 2-second cooldown between trigger matches
 - Protocol negotiation (Telnet IAC) must be handled before passing data to Term
 - Session store auto-saves on changes - avoid unnecessary mutations
+- `recognize_config.json` is overwritten on every startup from embedded defaults (user edits are lost)

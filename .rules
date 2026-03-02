@@ -457,6 +457,8 @@ Auto-recognize input supports flexible IP detection anywhere in the string with 
 
 **Credential separators:** tab, slash, or space. **Bulk import:** `环境` = Telnet, `后台` = SSH.
 
+**Recognition Config:** Rules are defined in `~/.config/bspterm/recognize_config.json`, which is auto-installed from embedded defaults on every startup (`crates/terminal/src/recognize_config.rs`).
+
 ## Terminal Reconnection
 
 The terminal supports reconnecting to SSH/Telnet sessions while preserving scrollback history (`crates/terminal/src/terminal.rs`, `crates/terminal_view/src/terminal_view.rs`).

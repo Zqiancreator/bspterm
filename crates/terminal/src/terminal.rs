@@ -7,6 +7,7 @@ pub mod highlight_rule;
 pub mod highlight_store;
 pub mod mappings;
 pub mod number_hover;
+pub mod recognize_config;
 pub mod rule_engine;
 pub mod rule_store;
 pub mod session_logger;
@@ -57,6 +58,11 @@ pub use highlight_rule::{
 
 pub use highlight_store::{
     GlobalHighlightStore, HighlightStore, HighlightStoreEntity, HighlightStoreEvent,
+};
+
+pub use recognize_config::{
+    ConnectionProtocol as RecognizeConnectionProtocol, GlobalRecognizeConfig, ParsedConnection,
+    RecognizeConfig, RecognizeConfigEntity, RecognizeConfigEvent, TokenType as RecognizeTokenType,
 };
 
 pub use terminal_lsp::{

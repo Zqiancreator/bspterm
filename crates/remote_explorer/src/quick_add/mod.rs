@@ -126,8 +126,8 @@ impl QuickAddArea {
     ) -> Option<ConnectionResult> {
         let input = self.auto_recognize.get_input(cx);
 
-        if is_session_env_info_format(&input) {
-            let parsed = parse_connection_text(&input);
+        if is_session_env_info_format(&input, cx) {
+            let parsed = parse_connection_text(&input, cx);
             if !parsed.is_empty() {
                 self.import_session_env_info(parsed, cx);
             }
@@ -135,7 +135,7 @@ impl QuickAddArea {
             return None;
         }
 
-        let parsed = parse_connection_text(&input);
+        let parsed = parse_connection_text(&input, cx);
 
         if parsed.is_empty() {
             return None;

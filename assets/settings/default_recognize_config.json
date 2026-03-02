@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "defaults": {
+    "port": 23,
+    "protocol": "telnet"
+  },
+  "separators": {
+    "entry": ["\n", ","],
+    "field": ["\t", " ", "/"]
+  },
+  "protocol_prefixes": [
+    {
+      "prefix": "环境",
+      "protocol": "telnet",
+      "default_port": 23
+    },
+    {
+      "prefix": "后台",
+      "protocol": "ssh",
+      "default_port": 22
+    }
+  ],
+  "port_protocol_map": {
+    "22": "ssh",
+    "23": "telnet"
+  },
+  "token_classifiers": [
+    {
+      "name": "ipv4",
+      "token_type": "ip",
+      "match_type": "ipv4",
+      "values": [],
+      "range": null,
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "port",
+      "token_type": "port",
+      "match_type": "port_range",
+      "values": [],
+      "range": [1, 65535],
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "password_special",
+      "token_type": "password",
+      "match_type": "contains_any",
+      "values": ["@"],
+      "range": null,
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "common_usernames",
+      "token_type": "username",
+      "match_type": "starts_with",
+      "values": [
+        "root", "admin", "debug", "test", "huawei", "cisco"
+      ],
+      "range": null,
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "chinese_label",
+      "token_type": "label",
+      "match_type": "has_non_ascii",
+      "values": [],
+      "range": null,
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "label_keywords",
+      "token_type": "label",
+      "match_type": "contains_any_word",
+      "values": ["slot", "clc", "ccc"],
+      "range": null,
+      "max_length": null,
+      "pattern": null
+    },
+    {
+      "name": "short_alphanumeric",
+      "token_type": "label",
+      "match_type": "alphanumeric_mix",
+      "values": [],
+      "range": null,
+      "max_length": 6,
+      "pattern": null
+    }
+  ],
+  "fallback_order": ["username", "password", "label"]
+}
