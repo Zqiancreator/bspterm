@@ -3743,9 +3743,19 @@ impl Item for TerminalView {
         if self.needs_serialize {
             return true;
         }
-        match self.terminal.read(cx).task() {
+        let terminal = self.terminal.read(cx);
+        match terminal.task() {
             Some(task) => task.status == TaskStatus::Running,
-            None => self.has_bell(),
+            None => {
+                // Remote terminals (SSH/Telnet) often send bell characters during normal
+                // operation (login prompts, error notifications, tab completion, etc.),
+                // which should not trigger the dirty indicator.
+                if terminal.connection_info().is_some() {
+                    false
+                } else {
+                    self.has_bell()
+                }
+            }
         }
     }
 
