@@ -53,7 +53,10 @@ def main():
         try:
             ip = get_mpu_ip(right_term, slot_id)
             if ip:
-                session_name = f"Slot{slot_id}-{ip}"
+                if "/" in slot_id:
+                    session_name = f"{slot_id}-{ip}"
+                else:
+                    session_name = f"Slot{slot_id}-{ip}"
                 Session.add_ssh_to_group(
                     group_id=group_id,
                     name=session_name,
