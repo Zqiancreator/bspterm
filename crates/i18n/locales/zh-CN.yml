@@ -245,6 +245,12 @@ script_panel:
   stop: "停止"
   output_placeholder: "输出将显示在此处..."
 
+# Script Parameters Modal
+script_params:
+  title: "运行"
+  run_button: "运行脚本"
+  required: "必填"
+
 # Command Panel
 command_panel:
   title: "命令面板"

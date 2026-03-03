@@ -57,6 +57,7 @@ try {
     New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
     Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\ne5000e_mpu_collector.py") -Destination $scriptsDir
     Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\device_online_notify.py") -Destination $scriptsDir
+    Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\disp_boa.py") -Destination $scriptsDir
 
     # Ensure output directory exists
     $fullOutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) {

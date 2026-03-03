@@ -245,6 +245,12 @@ script_panel:
   stop: "Stop"
   output_placeholder: "Output will appear here..."
 
+# Script Parameters Modal
+script_params:
+  title: "Run"
+  run_button: "Run Script"
+  required: "Required"
+
 # Command Panel
 command_panel:
   title: "Command Panel"

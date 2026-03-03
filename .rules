@@ -524,7 +524,7 @@ Python scripts automate terminal sessions via Unix socket JSON-RPC (`crates/term
 ### Python Client (`assets/scripts/bspterm.py`)
 
 ```python
-from bspterm import current_terminal, SSH, Telnet
+from bspterm import current_terminal, SSH, Telnet, params
 
 # Focused terminal
 term = current_terminal()
@@ -535,6 +535,10 @@ term = SSH.connect("192.168.1.1", user="root", password="secret")
 term.wait_for("$")
 term.run("hostname")
 term.close()
+
+# Access script parameters (see Script Parameters below)
+host = params.host
+port = params.get("port", 22)
 ```
 
 ### Script Panel
@@ -542,7 +546,75 @@ term.close()
 - **Action**: `bspterm_actions::script_panel::ToggleFocus`
 - **Position**: Left or Right dock (default: Left)
 - **Scripts**: `~/.config/bspterm/scripts/*.py`
-- **Env vars**: `BSPTERM_SOCKET`, `BSPTERM_CURRENT_TERMINAL`
+- **Env vars**: `BSPTERM_SOCKET`, `BSPTERM_CURRENT_TERMINAL`, `BSPTERM_PARAM_*`
+
+### Script Parameters
+
+Scripts can declare parameters using the `@params` block in their docstring. When such a script is run, a modal dialog prompts the user for input before execution.
+
+**Parameter Declaration Format:**
+
+```python
+"""
+Script description
+
+@params
+- host: string
+  description: Target IP address
+  required: true
+  default: "192.168.1.1"
+
+- port: number
+  description: Connection port
+  default: 22
+
+- protocol: choice
+  description: Connection protocol
+  choices: ["SSH", "Telnet"]
+  default: "SSH"
+
+- password: password
+  description: Device password
+  required: true
+
+- verbose: boolean
+  description: Enable verbose output
+  default: false
+@end_params
+"""
+
+from bspterm import params
+
+host = params.host          # Direct access
+port = params.get("port", 22)  # With default
+```
+
+**Parameter Types:**
+
+| Type | UI Control | Description |
+|------|------------|-------------|
+| `string` | Text input | Plain text |
+| `number` | Text input + validation | Numeric value |
+| `boolean` | Checkbox | True/false toggle |
+| `choice` | Button group | Select from predefined options |
+| `password` | Text input | Sensitive input |
+
+**Metadata Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | No | Label displayed in UI |
+| `required` | No | If true, field must be filled (default: false) |
+| `default` | No | Default value |
+| `choices` | Yes for choice type | List of options `["A", "B"]` |
+
+**Implementation Files:**
+- `crates/script_panel/src/script_params.rs` - Parameter parsing
+- `crates/script_panel/src/script_params_modal.rs` - UI modal
+
+**Example Scripts with Parameters:**
+- `assets/scripts/disp_boa.py` - Simple example: sends `disp boa {slotid}` command (slotid is required string param)
+- `assets/scripts/example_with_params.py` - Comprehensive example demonstrating all parameter types
 
 ## Terminal Automation Rules
 

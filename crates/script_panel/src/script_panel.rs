@@ -1,5 +1,8 @@
+pub mod script_params;
+pub mod script_params_modal;
 pub mod script_runner;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -18,6 +21,8 @@ use workspace::{
 };
 use bspterm_actions::script_panel::ToggleFocus;
 
+use script_params::ScriptParams;
+use script_params_modal::ScriptParamsModal;
 use script_runner::{ScriptRunner, ScriptStatus};
 
 const SCRIPT_PANEL_KEY: &str = "ScriptPanel";
@@ -129,35 +134,111 @@ impl ScriptPanel {
         self.scripts = Self::load_scripts();
     }
 
-    fn run_script(&mut self, index: usize, _window: &mut Window, cx: &mut Context<Self>) {
+    fn run_script(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if index >= self.scripts.len() {
             return;
         }
 
         let script = &self.scripts[index];
-        self.output.clear();
-        self.output.push_str(&format!("Running {}...\n", script.name));
 
-        let focused_terminal_id = terminal_scripting::TerminalRegistry::focused_id(cx)
-            .map(|id| id.to_string());
+        // Read script content to check for parameters
+        let content = std::fs::read_to_string(&script.path).ok();
+        let params = content
+            .as_ref()
+            .and_then(|c| ScriptParams::parse_from_script(c));
+
+        if let Some(params) = params {
+            if !params.is_empty() {
+                self.show_params_modal(index, params, window, cx);
+                return;
+            }
+        }
+
+        // No parameters - execute directly
+        self.execute_script(index, HashMap::new(), cx);
+    }
+
+    fn show_params_modal(
+        &mut self,
+        script_index: usize,
+        params: ScriptParams,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let script_name = self.scripts[script_index].name.clone();
+        let script_path = self.scripts[script_index].path.clone();
+        let workspace = self.workspace.clone();
+        let script_panel = cx.entity().downgrade();
+
+        if let Some(workspace) = workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, move |window, cx| {
+                    ScriptParamsModal::new(
+                        script_name.clone(),
+                        script_path,
+                        params,
+                        script_panel,
+                        window,
+                        cx,
+                    )
+                });
+            });
+        }
+
+        self.selected_script = Some(script_index);
+        cx.notify();
+    }
+
+    fn execute_script(
+        &mut self,
+        index: usize,
+        params: HashMap<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.scripts.len() {
+            return;
+        }
+
+        let script = &self.scripts[index];
+        self.execute_script_with_path(&script.path.clone(), params, cx);
+        self.selected_script = Some(index);
+    }
+
+    pub fn execute_script_with_path(
+        &mut self,
+        script_path: &PathBuf,
+        params: HashMap<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let script_name = script_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "script".to_string());
+
+        self.output.clear();
+        self.output.push_str(&format!("Running {}...\n", script_name));
+
+        let focused_terminal_id =
+            terminal_scripting::TerminalRegistry::focused_id(cx).map(|id| id.to_string());
 
         let connection_info = terminal_scripting::ScriptingServer::get(cx);
 
         if connection_info.is_none() {
-            self.output.push_str("Error: Scripting server not running\n");
+            self.output
+                .push_str("Error: Scripting server not running\n");
             cx.notify();
             return;
         }
 
         let connection_string = connection_info.unwrap().to_env_string();
-        let runner = ScriptRunner::new(
-            script.path.clone(),
+        let runner = ScriptRunner::new_with_params(
+            script_path.clone(),
             connection_string,
             focused_terminal_id,
+            params,
         );
 
         self.script_runner = Some(runner);
-        self.selected_script = Some(index);
 
         let script_runner = self.script_runner.as_mut().unwrap();
         if let Err(e) = script_runner.start() {

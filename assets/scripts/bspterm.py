@@ -831,6 +831,92 @@ class Telnet:
         )
 
 
+class _Params:
+    """
+    Access script parameters passed from BSPTerm.
+
+    Parameters are declared in the script's docstring using the @params block
+    and passed as environment variables with BSPTERM_PARAM_ prefix.
+
+    Example:
+        from bspterm import params
+
+        host = params.host  # Access parameter directly
+        port = params.get("port", 22)  # With default value
+
+    Parameter docstring format:
+        @params
+        - host: string
+          description: Target host
+          required: true
+          default: "192.168.1.1"
+        @end_params
+    """
+
+    def __init__(self):
+        self._loaded = False
+        self._values = {}
+
+    def _load(self):
+        if self._loaded:
+            return
+        self._loaded = True
+
+        prefix = "BSPTERM_PARAM_"
+        for key, value in os.environ.items():
+            if key.startswith(prefix):
+                param_name = key[len(prefix):].lower()
+                self._values[param_name] = self._parse_value(value)
+
+    def _parse_value(self, value):
+        if value.lower() == "true":
+            return True
+        if value.lower() == "false":
+            return False
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                return float(value)
+            except ValueError:
+                return value
+
+    def __getattr__(self, name):
+        self._load()
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        if name in self._values:
+            return self._values[name]
+        raise AttributeError(f"Parameter '{name}' not provided")
+
+    def get(self, name, default=None):
+        """Get a parameter value with optional default."""
+        self._load()
+        return self._values.get(name.lower(), default)
+
+    def __contains__(self, name):
+        """Check if a parameter exists."""
+        self._load()
+        return name.lower() in self._values
+
+    def keys(self):
+        """Return all parameter names."""
+        self._load()
+        return self._values.keys()
+
+    def items(self):
+        """Return all parameter name-value pairs."""
+        self._load()
+        return self._values.items()
+
+    def __repr__(self):
+        self._load()
+        return f"Params({self._values})"
+
+
+params = _Params()
+
+
 __all__ = [
     "BsptermError",
     "ConnectionError",
@@ -849,4 +935,5 @@ __all__ = [
     "current_terminal",
     "new_terminal",
     "toast",
+    "params",
 ]

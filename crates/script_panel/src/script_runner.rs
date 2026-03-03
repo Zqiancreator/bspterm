@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -22,6 +23,7 @@ pub struct ScriptRunner {
     script_path: PathBuf,
     connection_string: String,
     focused_terminal_id: Option<String>,
+    params: HashMap<String, String>,
     process: Option<Child>,
     status: ScriptStatus,
 }
@@ -32,10 +34,20 @@ impl ScriptRunner {
         connection_string: String,
         focused_terminal_id: Option<String>,
     ) -> Self {
+        Self::new_with_params(script_path, connection_string, focused_terminal_id, HashMap::new())
+    }
+
+    pub fn new_with_params(
+        script_path: PathBuf,
+        connection_string: String,
+        focused_terminal_id: Option<String>,
+        params: HashMap<String, String>,
+    ) -> Self {
         Self {
             script_path,
             connection_string,
             focused_terminal_id,
+            params,
             process: None,
             status: ScriptStatus::NotStarted,
         }
@@ -61,6 +73,11 @@ impl ScriptRunner {
 
         if let Some(terminal_id) = &self.focused_terminal_id {
             command.env("BSPTERM_CURRENT_TERMINAL", terminal_id);
+        }
+
+        // Add script parameters as environment variables
+        for (key, value) in &self.params {
+            command.env(key, value);
         }
 
         #[cfg(windows)]
