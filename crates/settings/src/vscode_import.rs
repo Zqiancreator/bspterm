@@ -886,6 +886,7 @@ impl VsCodeSettings {
             device_online_script: None,
             ssh_keepalive_interval_secs: None,
             ssh_keepalive_max: None,
+            group_tabs_by_session: None,
         })
     }
 

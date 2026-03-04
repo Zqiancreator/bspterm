@@ -234,6 +234,13 @@ pub struct TerminalSettingsContent {
     ///
     /// Default: 2
     pub ssh_keepalive_max: Option<usize>,
+    /// Whether to group terminal tabs by their Remote Explorer session group.
+    /// When enabled, tabs are organized into separate rows by group.
+    /// 是否按 Remote Explorer 会话组对终端标签页分组。
+    /// 启用后，标签页将按组显示在不同的行中。
+    ///
+    /// Default: true
+    pub group_tabs_by_session: Option<bool>,
 }
 
 /// Shell configuration to open the terminal with.

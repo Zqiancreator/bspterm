@@ -46,6 +46,27 @@ use i18n::t;
 
 const TERMINAL_PANEL_KEY: &str = "TerminalPanel";
 
+/// Key to identify a group of terminal tabs
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GroupKey {
+    /// A session group from Remote Explorer (by UUID)
+    SessionGroup(uuid::Uuid),
+    /// Root-level sessions (not in any group)
+    Ungrouped,
+    /// Local terminals (no connection info)
+    Local,
+    /// Non-terminal items (editors, buffers, etc.)
+    Other,
+}
+
+/// A group of terminal tabs with their indices in the pane
+#[derive(Clone, Debug)]
+pub struct TerminalTabGroup {
+    pub key: GroupKey,
+    pub group_name: String,
+    pub tab_indices: Vec<usize>,
+}
+
 pub fn init(cx: &mut App) {
     cx.observe_new(
         |workspace: &mut Workspace, _window, _: &mut Context<Workspace>| {
@@ -88,6 +109,10 @@ pub struct TerminalPanel {
     assistant_enabled: bool,
     assistant_tab_bar_button: Option<AnyView>,
     active: bool,
+    /// Order of tab groups. Groups appear in the order they were first opened.
+    group_order: Vec<GroupKey>,
+    /// Manual group overrides for non-terminal items (e.g., exported buffers)
+    group_overrides: HashMap<gpui::EntityId, GroupKey>,
 }
 
 impl TerminalPanel {
@@ -108,8 +133,20 @@ impl TerminalPanel {
             assistant_enabled: true,
             assistant_tab_bar_button: None,
             active: false,
+            group_order: Vec::new(),
+            group_overrides: HashMap::default(),
         };
         terminal_panel.apply_tab_bar_buttons(&terminal_panel.active_pane, cx);
+
+        // Observe settings changes to re-apply tab bar when grouping setting changes
+        cx.observe_global::<settings::SettingsStore>(|this, cx| {
+            for pane in this.center.panes() {
+                this.apply_tab_bar_buttons(pane, cx);
+            }
+            this.apply_grouped_tab_bar_to_center_panes(cx);
+        })
+        .detach();
+
         terminal_panel
     }
 
@@ -136,7 +173,11 @@ impl TerminalPanel {
 
     pub(crate) fn apply_tab_bar_buttons(&self, terminal_pane: &Entity<Pane>, cx: &mut Context<Self>) {
         let assistant_tab_bar_button = self.assistant_tab_bar_button.clone();
+        let group_tabs = TerminalSettings::get_global(cx).group_tabs_by_session;
+        let weak_panel = cx.entity().downgrade();
+
         terminal_pane.update(cx, |pane, cx| {
+            // Set up the tab bar buttons (right side)
             pane.set_render_tab_bar_buttons(cx, move |pane, window, cx| {
                 let split_context = pane
                     .active_item()
@@ -241,7 +282,43 @@ impl TerminalPanel {
                     .into();
                 (None, right_children)
             });
+
+            // Set up the grouped tab bar if enabled
+            if group_tabs {
+                let weak_panel = weak_panel.clone();
+                pane.set_render_tab_bar(cx, move |pane, window, cx| {
+                    render_grouped_tab_bar(&weak_panel, pane, window, cx)
+                });
+            } else {
+                pane.set_render_tab_bar(cx, Pane::render_tab_bar);
+            }
         });
+    }
+
+    fn apply_grouped_tab_bar_to_center_panes(&self, cx: &mut Context<Self>) {
+        let group_tabs = TerminalSettings::get_global(cx).group_tabs_by_session;
+        let weak_panel = cx.entity().downgrade();
+        let Some(workspace) = self.workspace.upgrade() else { return };
+        let center_panes: Vec<_> = workspace.read(cx).panes().to_vec();
+        for pane in center_panes {
+            pane.update(cx, |pane, cx| {
+                if group_tabs {
+                    let weak_panel = weak_panel.clone();
+                    pane.set_render_tab_bar(cx, move |pane, window, cx| {
+                        render_grouped_tab_bar(&weak_panel, pane, window, cx)
+                    });
+                } else {
+                    pane.set_render_tab_bar(cx, Pane::render_tab_bar);
+                }
+            });
+        }
+    }
+
+    pub fn register_item_group(&mut self, item_id: gpui::EntityId, group_key: GroupKey) {
+        self.group_overrides.insert(item_id, group_key);
+        if !self.group_order.contains(&self.group_overrides[&item_id]) {
+            self.group_order.push(self.group_overrides[&item_id].clone());
+        }
     }
 
     fn serialization_key(workspace: &Workspace) -> Option<String> {
@@ -344,6 +421,14 @@ impl TerminalPanel {
                     .ok();
             }
         }
+
+        // Apply grouped tab bar to center panes
+        terminal_panel
+            .update_in(&mut cx, |panel, _window, cx| {
+                panel.apply_grouped_tab_bar_to_center_panes(cx);
+            })
+            .ok();
+
         Ok(terminal_panel)
     }
 
@@ -356,7 +441,11 @@ impl TerminalPanel {
     ) {
         match event {
             pane::Event::ActivateItem { .. } => self.serialize(cx),
-            pane::Event::RemovedItem { .. } => self.serialize(cx),
+            pane::Event::RemovedItem { item } => {
+                self.group_overrides.remove(&item.item_id());
+                self.cleanup_empty_groups(pane, cx);
+                self.serialize(cx);
+            }
             pane::Event::Remove { focus_on_pane } => {
                 let pane_count_before_removal = self.center.panes().len();
                 let _removal_result = self.center.remove(pane, cx);
@@ -390,6 +479,10 @@ impl TerminalPanel {
                 cx.notify();
             }
             pane::Event::AddItem { item } => {
+                // Update group_order when new terminal is added
+                if let Some(terminal_view) = item.downcast::<TerminalView>() {
+                    self.update_group_order_for_terminal(&terminal_view.read(cx), cx);
+                }
                 if let Some(workspace) = self.workspace.upgrade() {
                     workspace.update(cx, |workspace, cx| {
                         item.added_to_pane(workspace, pane.clone(), window, cx)
@@ -1170,6 +1263,339 @@ impl TerminalPanel {
             cx.notify();
         }
     }
+
+    /// Convert a terminal view to its group key
+    fn terminal_to_group_key(&self, terminal_view: &TerminalView, cx: &App) -> GroupKey {
+        let (group_id, _) = terminal_view.get_session_group_info(cx);
+
+        // Check if it's a remote terminal (SSH/Telnet)
+        let is_remote = terminal_view
+            .terminal()
+            .read(cx)
+            .connection_info()
+            .is_some();
+
+        match group_id {
+            Some(id) => GroupKey::SessionGroup(id),
+            None if is_remote => GroupKey::Ungrouped,
+            None => GroupKey::Local,
+        }
+    }
+
+    /// Groups terminal items by session group.
+    /// Returns groups in the order stored in `self.group_order`.
+    fn group_terminals_by_session(&self, pane: &Pane, cx: &App) -> Vec<TerminalTabGroup> {
+        let mut groups: HashMap<GroupKey, TerminalTabGroup> = HashMap::default();
+
+        // Collect all terminals into groups
+        for (index, item) in pane.items().enumerate() {
+            if let Some(terminal_view) = item.downcast::<TerminalView>() {
+                let terminal_view = terminal_view.read(cx);
+                let key = self.terminal_to_group_key(terminal_view, cx);
+                let (_, group_name) = terminal_view.get_session_group_info(cx);
+
+                let group_name = match &key {
+                    GroupKey::SessionGroup(_) => group_name.unwrap_or_else(|| "Unknown".to_string()),
+                    GroupKey::Ungrouped => "Ungrouped".to_string(),
+                    GroupKey::Local => "Local".to_string(),
+                    GroupKey::Other => "Other".to_string(),
+                };
+
+                groups
+                    .entry(key.clone())
+                    .or_insert_with(|| TerminalTabGroup {
+                        key: key.clone(),
+                        group_name,
+                        tab_indices: Vec::new(),
+                    })
+                    .tab_indices
+                    .push(index);
+            } else {
+                let item_id = item.item_id();
+                let key = self.group_overrides.get(&item_id).cloned()
+                    .unwrap_or(GroupKey::Other);
+
+                let group_name = match &key {
+                    GroupKey::SessionGroup(_) => {
+                        // Look up group name from any terminal in that group
+                        "Unknown".to_string()
+                    }
+                    GroupKey::Ungrouped => "Ungrouped".to_string(),
+                    GroupKey::Local => "Local".to_string(),
+                    GroupKey::Other => "Other".to_string(),
+                };
+
+                groups
+                    .entry(key.clone())
+                    .or_insert_with(|| TerminalTabGroup {
+                        key: key.clone(),
+                        group_name,
+                        tab_indices: Vec::new(),
+                    })
+                    .tab_indices
+                    .push(index);
+            }
+        }
+
+        // Order groups according to self.group_order
+        let mut result = Vec::new();
+        for key in &self.group_order {
+            if let Some(group) = groups.remove(key) {
+                result.push(group);
+            }
+        }
+
+        // Append any new groups not yet in order (sorted by key for consistency)
+        let mut remaining: Vec<_> = groups.into_values().collect();
+        remaining.sort_by(|a, b| {
+            match (&a.key, &b.key) {
+                (GroupKey::SessionGroup(a_id), GroupKey::SessionGroup(b_id)) => a_id.cmp(b_id),
+                (GroupKey::SessionGroup(_), _) => std::cmp::Ordering::Less,
+                (_, GroupKey::SessionGroup(_)) => std::cmp::Ordering::Greater,
+                (GroupKey::Ungrouped, GroupKey::Local) => std::cmp::Ordering::Less,
+                (GroupKey::Local, GroupKey::Ungrouped) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
+        });
+        result.extend(remaining);
+
+        result
+    }
+
+    /// Called when a terminal is added - updates group_order if needed
+    fn update_group_order_for_terminal(&mut self, terminal_view: &TerminalView, cx: &App) {
+        let key = self.terminal_to_group_key(terminal_view, cx);
+
+        if !self.group_order.contains(&key) {
+            self.group_order.push(key);
+        }
+    }
+
+    /// Remove empty groups from group_order
+    fn cleanup_empty_groups(&mut self, pane: &Entity<Pane>, cx: &App) {
+        let groups = self.group_terminals_by_session(pane.read(cx), cx);
+        let active_keys: std::collections::HashSet<_> = groups.iter().map(|g| &g.key).collect();
+        self.group_order.retain(|key| active_keys.contains(key));
+    }
+
+    /// Move a group row up in the order
+    fn move_group_up(&mut self, key: &GroupKey, cx: &mut Context<Self>) {
+        if let Some(pos) = self.group_order.iter().position(|k| k == key) {
+            if pos > 0 {
+                self.group_order.swap(pos, pos - 1);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Move a group row down in the order
+    fn move_group_down(&mut self, key: &GroupKey, cx: &mut Context<Self>) {
+        if let Some(pos) = self.group_order.iter().position(|k| k == key) {
+            if pos < self.group_order.len() - 1 {
+                self.group_order.swap(pos, pos + 1);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Close all terminals in a group
+    fn close_group(
+        &mut self,
+        key: &GroupKey,
+        pane: &Entity<Pane>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = self.group_terminals_by_session(pane.read(cx), cx);
+        if let Some(group) = groups.iter().find(|g| &g.key == key) {
+            // Collect item IDs first, then close them (to avoid index shifting issues)
+            let item_ids: Vec<_> = group
+                .tab_indices
+                .iter()
+                .filter_map(|&ix| pane.read(cx).item_for_index(ix).map(|item| item.item_id()))
+                .collect();
+            for item_id in item_ids.into_iter().rev() {
+                pane.update(cx, |pane, cx| {
+                    pane.close_item_by_id(item_id, workspace::SaveIntent::Close, window, cx)
+                        .detach_and_log_err(cx);
+                });
+            }
+        }
+        // Remove from group_order
+        self.group_order.retain(|k| k != key);
+        cx.notify();
+    }
+}
+
+/// Render a grouped tab bar where tabs are organized by session group.
+/// Each group gets its own row with: [GroupName] [Tabs...] [↑][↓][×]
+fn render_grouped_tab_bar(
+    weak_panel: &WeakEntity<TerminalPanel>,
+    pane: &mut Pane,
+    window: &mut Window,
+    cx: &mut Context<Pane>,
+) -> gpui::AnyElement {
+    let Some(panel) = weak_panel.upgrade() else {
+        return gpui::Empty.into_any();
+    };
+
+    let groups = panel.read(cx).group_terminals_by_session(pane, cx);
+
+    if groups.is_empty() {
+        return Pane::render_tab_bar(pane, window, cx);
+    }
+
+    let focus_handle = pane.focus_handle(cx);
+    let total_groups = groups.len();
+    let active_item_index = pane.active_item_index();
+
+    v_flex()
+        .w_full()
+        .bg(cx.theme().colors().tab_bar_background)
+        .children(groups.into_iter().enumerate().map(|(row_idx, group)| {
+            let is_first = row_idx == 0;
+            let is_last = row_idx == total_groups - 1;
+            let group_key = group.key.clone();
+            let weak_panel = weak_panel.clone();
+            let pane_entity = cx.entity();
+
+            // Single row: [GroupLabel] [Tabs...] [Controls]
+            h_flex()
+                .w_full()
+                .min_h(px(29.))
+                .border_b_1()
+                .border_color(cx.theme().colors().border)
+                .drag_over::<DraggedTab>(|row, _, _, cx| {
+                    row.bg(cx.theme().colors().drop_target_background)
+                })
+                .on_drop({
+                    let group_key = group_key.clone();
+                    let weak_panel = weak_panel.clone();
+                    move |dragged_tab: &DraggedTab, _window, cx| {
+                        let item_id = dragged_tab.item.item_id();
+                        if let Some(panel) = weak_panel.upgrade() {
+                            panel.update(cx, |panel, cx| {
+                                panel.register_item_group(item_id, group_key.clone());
+                                cx.notify();
+                            });
+                        }
+                    }
+                })
+                // Group name label (fixed width prefix)
+                .child(
+                    div()
+                        .px_2()
+                        .flex_shrink_0()
+                        .min_w(px(80.))
+                        .max_w(px(120.))
+                        .border_r_1()
+                        .border_color(cx.theme().colors().border)
+                        .flex()
+                        .items_center()
+                        .child(
+                            Label::new(group.group_name.clone())
+                                .size(LabelSize::Small)
+                                .color(Color::Muted)
+                                .truncate()
+                        )
+                )
+                // Tabs (flexible, scrollable if needed)
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_x_hidden()
+                        .child(
+                            h_flex()
+                                .children(group.tab_indices.iter().map(|&ix| {
+                                    let item = pane.item_for_index(ix);
+                                    let is_active = ix == active_item_index;
+                                    if let Some(item) = item {
+                                        let tab = pane.render_tab(
+                                            ix,
+                                            item,
+                                            0,
+                                            &focus_handle,
+                                            false,
+                                            window,
+                                            cx,
+                                        );
+                                        // Wrap in a div to apply active styling
+                                        div()
+                                            .when(is_active, |d| d.bg(cx.theme().colors().tab_active_background))
+                                            .child(tab)
+                                            .into_any_element()
+                                    } else {
+                                        gpui::Empty.into_any()
+                                    }
+                                }))
+                        )
+                )
+                // Row control buttons (fixed width suffix)
+                .child({
+                    let group_key_up = group_key.clone();
+                    let group_key_down = group_key.clone();
+                    let group_key_close = group_key.clone();
+                    let weak_panel_up = weak_panel.clone();
+                    let weak_panel_down = weak_panel.clone();
+                    let weak_panel_close = weak_panel.clone();
+                    let pane_entity_close = pane_entity.clone();
+
+                    h_flex()
+                        .flex_shrink_0()
+                        .px_1()
+                        .gap_0p5()
+                        .border_l_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            IconButton::new(
+                                SharedString::from(format!("move_up_{}", row_idx)),
+                                IconName::ChevronUp,
+                            )
+                            .icon_size(IconSize::XSmall)
+                            .disabled(is_first)
+                            .tooltip(Tooltip::text(t("terminal_panel.move_group_up")))
+                            .on_click(move |_, _, cx| {
+                                if let Some(panel) = weak_panel_up.upgrade() {
+                                    panel.update(cx, |panel, cx| {
+                                        panel.move_group_up(&group_key_up, cx);
+                                    });
+                                }
+                            })
+                        )
+                        .child(
+                            IconButton::new(
+                                SharedString::from(format!("move_down_{}", row_idx)),
+                                IconName::ChevronDown,
+                            )
+                            .icon_size(IconSize::XSmall)
+                            .disabled(is_last)
+                            .tooltip(Tooltip::text(t("terminal_panel.move_group_down")))
+                            .on_click(move |_, _, cx| {
+                                if let Some(panel) = weak_panel_down.upgrade() {
+                                    panel.update(cx, |panel, cx| {
+                                        panel.move_group_down(&group_key_down, cx);
+                                    });
+                                }
+                            })
+                        )
+                        .child(
+                            IconButton::new(
+                                SharedString::from(format!("close_group_{}", row_idx)),
+                                IconName::Close,
+                            )
+                            .icon_size(IconSize::XSmall)
+                            .tooltip(Tooltip::text(t("terminal_panel.close_group")))
+                            .on_click(move |_, window, cx| {
+                                if let Some(panel) = weak_panel_close.upgrade() {
+                                    panel.update(cx, |panel, cx| {
+                                        panel.close_group(&group_key_close, &pane_entity_close, window, cx);
+                                    });
+                                }
+                            })
+                        )
+                })
+        }))
+        .into_any_element()
 }
 
 /// Prepares a `SpawnInTerminal` by computing the command, args, and command_label

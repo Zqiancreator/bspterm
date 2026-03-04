@@ -221,6 +221,9 @@ terminal_panel:
   edit_settings: "Edit Settings"
   open_settings: "Open Settings"
   edit_settings_json: "Edit settings.json"
+  move_group_up: "Move Group Up"
+  move_group_down: "Move Group Down"
+  close_group: "Close All in Group"
 
 # Editor Panel
 editor_panel:

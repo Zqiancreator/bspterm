@@ -120,6 +120,7 @@ pub(crate) fn deserialize_terminal_panel(
                     terminal_panel.active_pane.update(cx, |pane, cx| {
                         populate_pane_items(pane, items, active_item, window, cx);
                     });
+                    terminal_panel.apply_tab_bar_buttons(&terminal_panel.active_pane, cx);
                 })?;
             }
             SerializedItems::WithSplits(serialized_pane_group) => {

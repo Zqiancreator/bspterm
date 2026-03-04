@@ -2678,7 +2678,9 @@ impl Pane {
         self.activate_item(index, true, true, window, cx);
     }
 
-    fn render_tab(
+    /// Render a single tab at the given index.
+    /// Public to allow custom tab bar implementations.
+    pub fn render_tab(
         &self,
         ix: usize,
         item: &dyn ItemHandle,
@@ -3324,7 +3326,7 @@ impl Pane {
             })
     }
 
-    fn render_tab_bar(&mut self, window: &mut Window, cx: &mut Context<Pane>) -> AnyElement {
+    pub fn render_tab_bar(&mut self, window: &mut Window, cx: &mut Context<Pane>) -> AnyElement {
         let Some(workspace) = self.workspace.upgrade() else {
             return gpui::Empty.into_any();
         };

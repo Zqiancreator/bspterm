@@ -221,6 +221,9 @@ terminal_panel:
   edit_settings: "编辑设置"
   open_settings: "打开设置"
   edit_settings_json: "编辑 settings.json"
+  move_group_up: "上移分组"
+  move_group_down: "下移分组"
+  close_group: "关闭分组内所有标签"
 
 # Editor Panel
 editor_panel:

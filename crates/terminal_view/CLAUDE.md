@@ -26,6 +26,8 @@ src/
 | `TerminalView` | Main terminal view entity (Item, Render, Focusable) |
 | `TerminalElement` | GPUI Element for rendering terminal grid |
 | `TerminalPanel` | Dockable panel containing terminal panes |
+| `GroupKey` | Enum identifying tab groups (SessionGroup, Ungrouped, Local, Other) |
+| `TerminalTabGroup` | A group of tabs with key, name, and indices |
 | `TerminalGutterDimensions` | Gutter sizing (line numbers, timestamps) |
 | `LayoutState` | Cached layout data for rendering |
 | `TerminalInputHandler` | IME and keyboard input handler |
@@ -74,6 +76,17 @@ SSH/Telnet terminal tabs display a colored LED indicator showing connection stat
 - `tab_led_color()`: Returns LED color based on priority (disconnected > new_output > connected)
 
 Local terminals (no `connection_info`) do not display an LED.
+
+## Grouped Tab Bar
+
+When `group_tabs_by_session` setting is enabled, tabs are grouped by session in both dock and center panes. Key details:
+
+- `TerminalPanel.group_overrides` maps non-terminal items (e.g., exported buffers) to a `GroupKey`
+- `apply_grouped_tab_bar_to_center_panes()` sets the grouped renderer on workspace center panes
+- `render_grouped_tab_bar()` renders group rows with drag-and-drop support between groups
+- `TerminalView::group_key(cx)` returns the group key for a terminal
+- Exported buffers inherit the source terminal's group via `register_item_group()`
+- Falls back to `Pane::render_tab_bar` when no groups exist
 
 ## Testing
 

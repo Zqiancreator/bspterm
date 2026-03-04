@@ -6,914 +6,204 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build and Development Commands
 
-**Build and run (debug):**
 ```sh
-cargo run
+cargo run                          # Build and run (debug)
+cargo run -p cli                   # Build and run (release CLI)
+cargo test --workspace             # Run tests
+cargo test -p <crate_name> <test>  # Run a single test
+./script/clippy                    # Lint (use instead of cargo clippy)
+script/linux                       # Install dependencies (Linux)
+./script/install-linux             # Install local dev build
 ```
 
-**Build and run (release CLI):**
-```sh
-cargo run -p cli
-```
-
-**Run tests:**
-```sh
-cargo test --workspace
-```
-
-**Run a single test:**
-```sh
-cargo test -p <crate_name> <test_name>
-```
-
-**Lint (use this instead of `cargo clippy`):**
-```sh
-./script/clippy
-```
-
-**Install dependencies (Linux):**
-```sh
-script/linux
-```
-
-**Install local development build:**
-```sh
-./script/install-linux
-```
-
-## CPU Resource Limiting
-
-为避免编译占满系统资源，所有 cargo 编译相关命令都应限制并行任务数：
-
-**Build with CPU limit:**
-```sh
-cargo build -j 9
-```
-
-**Check with CPU limit:**
-```sh
-cargo check -j 9
-```
-
-**Test with CPU limit:**
-```sh
-cargo test --workspace -j 9
-```
-
-**Run with CPU limit:**
-```sh
-cargo run -j 9
-```
-
-也可以通过环境变量全局设置：
-```sh
-export CARGO_BUILD_JOBS=9
-```
-
-注意：系统有 12 核，`-j 9` 使用 75% 核心，保留 3 核给系统和其他应用。
+**CPU limiting:** Always use `-j 9` with cargo commands (12 cores, keep 3 free). Or `export CARGO_BUILD_JOBS=9`.
 
 ## High-Level Architecture
 
-This is a fork of [Zed](https://github.com/zed-industries/zed), a GPU-accelerated code editor. Key crates:
+Fork of [Zed](https://github.com/zed-industries/zed), a GPU-accelerated code editor. Key crates:
 
-- **gpui** (`crates/gpui`): GPU-accelerated UI framework providing state management, concurrency primitives, and rendering. The core abstraction layer.
-- **bspterm** (`crates/bspterm`): Main application entry point that ties everything together.
-- **editor** (`crates/editor`): Core text editor component used for both code editing and input fields. Handles LSP display features.
-- **workspace** (`crates/workspace`): Window management, local state serialization, and project grouping.
-- **project** (`crates/project`): File management, navigation, and LSP communication.
-- **language** (`crates/language`): Language understanding including syntax trees and symbol lists.
-- **lsp** (`crates/lsp`): LSP server communication.
-- **vim** (`crates/vim`): Vim mode implementation over the editor.
-- **ui** (`crates/ui`): Shared UI components and patterns.
-- **collab** (`crates/collab`): Collaboration server for project sharing.
-- **terminal** / **terminal_view** (`crates/terminal`, `crates/terminal_view`): Terminal emulator with SSH/Telnet session management and automation rule engine.
-- **remote_explorer** (`crates/remote_explorer`): Panel for browsing and managing saved SSH/Telnet sessions in a tree view.
-- **rule_editor** (`crates/rule_editor`): Panel for managing terminal automation rules (auto-login, pattern-based actions).
-- **highlight_editor** (`crates/highlight_editor`): Panel for managing terminal semantic highlighting rules (regex-based pattern matching with colors).
-- **log_tracer** (`crates/log_tracer`): Core analysis engine for parsing terminal logs, searching code in Docker containers, and generating call graphs.
-- **call_graph_panel** (`crates/call_graph_panel`): Panel for visualizing call graphs generated from terminal log analysis.
+- **gpui** (`crates/gpui`): GPU-accelerated UI framework — state management, concurrency, rendering
+- **bspterm** (`crates/bspterm`): Main application entry point
+- **editor** (`crates/editor`): Core text editor component, handles LSP display
+- **workspace** (`crates/workspace`): Window management, state serialization, project grouping
+- **project** (`crates/project`): File management, navigation, LSP communication
+- **language** (`crates/language`): Syntax trees and symbol lists
+- **lsp** (`crates/lsp`): LSP server communication
+- **vim** (`crates/vim`): Vim mode implementation
+- **ui** (`crates/ui`): Shared UI components
+- **collab** (`crates/collab`): Collaboration server
+- **terminal** / **terminal_view** (`crates/terminal`, `crates/terminal_view`): Terminal emulator with SSH/Telnet, automation rules
+- **remote_explorer** (`crates/remote_explorer`): SSH/Telnet session tree panel
+- **rule_editor** (`crates/rule_editor`): Terminal automation rules panel
+- **highlight_editor** (`crates/highlight_editor`): Terminal highlighting rules panel
+- **log_tracer** (`crates/log_tracer`): Terminal log analysis, Docker code search, call graphs
+- **call_graph_panel** (`crates/call_graph_panel`): Call graph visualization
 
 ## Rust Coding Guidelines
 
-* Prioritize code correctness and clarity. Speed and efficiency are secondary priorities unless otherwise specified.
-* Do not write organizational or comments that summarize the code. Comments should only be written in order to explain "why" the code is written in some way in the case there is a reason that is tricky / non-obvious.
-* Prefer implementing functionality in existing files unless it is a new logical component. Avoid creating many small files.
-* Avoid using functions that panic like `unwrap()`, instead use mechanisms like `?` to propagate errors.
-* Be careful with operations like indexing which may panic if the indexes are out of bounds.
-* Never silently discard errors with `let _ =` on fallible operations. Always handle errors appropriately:
-  - Propagate errors with `?` when the calling function should handle them
-  - Use `.log_err()` or similar when you need to ignore errors but want visibility
-  - Use explicit error handling with `match` or `if let Err(...)` when you need custom logic
-  - Example: avoid `let _ = client.request(...).await?;` - use `client.request(...).await?;` instead
-* When implementing async operations that may fail, ensure errors propagate to the UI layer so users get meaningful feedback.
-* Never create files with `mod.rs` paths - prefer `src/some_module.rs` instead of `src/some_module/mod.rs`.
-* When creating new crates, prefer specifying the library root path in `Cargo.toml` using `[lib] path = "...rs"` instead of the default `lib.rs`, to maintain consistent and descriptive naming (e.g., `gpui.rs` or `main.rs`).
-* Avoid creative additions unless explicitly requested
-* Use full words for variable names (no abbreviations like "q" for "queue")
-* Use variable shadowing to scope clones in async contexts for clarity, minimizing the lifetime of borrowed references.
-  Example:
+* Prioritize code correctness and clarity. Speed and efficiency are secondary.
+* Do not write organizational or summary comments. Only explain "why" for tricky/non-obvious code.
+* Prefer implementing in existing files unless it is a new logical component.
+* Avoid `unwrap()` — use `?` to propagate errors.
+* Be careful with indexing — may panic if out of bounds.
+* Never silently discard errors with `let _ =` on fallible operations:
+  - Propagate with `?`, use `.log_err()` for visibility, or handle explicitly with `match`/`if let Err(...)`
+* Ensure async errors propagate to the UI layer for meaningful feedback.
+* Never create `mod.rs` files — use `src/some_module.rs` instead.
+* New crates: specify `[lib] path = "...rs"` in Cargo.toml instead of default `lib.rs`.
+* Avoid creative additions unless explicitly requested.
+* Use full words for variable names (no abbreviations).
+* Use variable shadowing to scope clones in async contexts:
   ```rust
   executor.spawn({
       let task_ran = task_ran.clone();
-      async move {
-          *task_ran.borrow_mut() = true;
-      }
+      async move { *task_ran.borrow_mut() = true; }
   });
   ```
 
-# Timers in tests
+## Timers in tests
 
-* In GPUI tests, prefer GPUI executor timers over `smol::Timer::after(...)` when you need timeouts, delays, or to drive `run_until_parked()`:
-  - Use `cx.background_executor().timer(duration).await` (or `cx.background_executor.timer(duration).await` in `TestAppContext`) so the work is scheduled on GPUI's dispatcher.
-  - Avoid `smol::Timer::after(...)` for test timeouts when you rely on `run_until_parked()`, because it may not be tracked by GPUI's scheduler and can lead to "nothing left to run" when pumping.
+* In GPUI tests, use `cx.background_executor().timer(duration).await` instead of `smol::Timer::after(...)` — the latter isn't tracked by GPUI's scheduler and can cause "nothing left to run" with `run_until_parked()`.
 
-# GPUI
+## GPUI
 
-GPUI is a UI framework which also provides primitives for state and concurrency management.
+### Context
 
-## Context
+Context types are passed as `cx`. Callbacks come after `cx`.
 
-Context types allow interaction with global state, windows, entities, and system services. They are typically passed to functions as the argument named `cx`. When a function takes callbacks they come after the `cx` parameter.
+* `App`: Root context — global state, entity read/update
+* `Context<T>`: Provided when updating `Entity<T>`, derefs into `App`
+* `AsyncApp` / `AsyncWindowContext`: From `cx.spawn` / `cx.spawn_in`, held across await points
 
-* `App` is the root context type, providing access to global state and read and update of entities.
-* `Context<T>` is provided when updating an `Entity<T>`. This context dereferences into `App`, so functions which take `&App` can also take `&Context<T>`.
-* `AsyncApp` and `AsyncWindowContext` are provided by `cx.spawn` and `cx.spawn_in`. These can be held across await points.
+### Window
 
-## `Window`
+`Window` is passed as `window` (before `cx`). Used for focus, action dispatch, drawing, input state.
 
-`Window` provides access to the state of an application window. It is passed to functions as an argument named `window` and comes before `cx` when present. It is used for managing focus, dispatching actions, directly drawing, getting user input state, etc.
+### Entities
 
-## Entities
+`Entity<T>` is a handle to state `T`:
+* `.read(cx)` → `&T`, `.update(cx, |thing, cx| ...)` → mutate with `Context<T>`
+* `.update_in(cx, |thing, window, cx| ...)` — also provides `Window`
+* `.downgrade()` → `WeakEntity<T>` (returns `Result` from read/update, avoids memory leaks)
+* Use inner `cx` in closures, not outer. Cannot update entity while already updating it (panics).
+* With async context, closure return values are wrapped in `anyhow::Result`.
 
-An `Entity<T>` is a handle to state of type `T`. With `thing: Entity<T>`:
+### Concurrency
 
-* `thing.entity_id()` returns `EntityId`
-* `thing.downgrade()` returns `WeakEntity<T>`
-* `thing.read(cx: &App)` returns `&T`.
-* `thing.read_with(cx, |thing: &T, cx: &App| ...)` returns the closure's return value.
-* `thing.update(cx, |thing: &mut T, cx: &mut Context<T>| ...)` allows the closure to mutate the state, and provides a `Context<T>` for interacting with the entity. It returns the closure's return value.
-* `thing.update_in(cx, |thing: &mut T, window: &mut Window, cx: &mut Context<T>| ...)` takes a `AsyncWindowContext` or `VisualTestContext`. It's the same as `update` while also providing the `Window`.
+All entity/UI work on foreground thread.
+* `cx.spawn(async move |cx| ...)` — foreground task. With `Context<T>`: `cx.spawn(async move |this, cx| ...)`
+* `cx.background_spawn(async move { ... })` — background thread
+* Both return `Task<R>`. Must be awaited, detached (`.detach()` / `.detach_and_log_err(cx)`), or stored to prevent cancellation.
+* `Task::ready(value)` for immediate values.
 
-Within the closures, the inner `cx` provided to the closure must be used instead of the outer `cx` to avoid issues with multiple borrows.
+### Elements
 
-Trying to update an entity while it's already being updated must be avoided as this will cause a panic.
+`Render` trait renders state into flexbox element tree. `RenderOnce` for transient components (`#[derive(IntoElement)]`).
 
-When  `read_with`, `update`, or `update_in` are used with an async context, the closure's return value is wrapped in an `anyhow::Result`.
+* Style methods similar to Tailwind CSS
+* **Scrollable lists:** Container must have `.min_h_0()` for scrolling to work in flex containers
+* `.when(condition, |this| ...)` / `.when_some(option, |this, value| ...)` for conditional rendering
+* `SharedString` (`&'static str` or `Arc<str>`) used to avoid copies
 
-`WeakEntity<T>` is a weak handle. It has `read_with`, `update`, and `update_in` methods that work the same, but always return an `anyhow::Result` so that they can fail if the entity no longer exists. This can be useful to avoid memory leaks - if entities have mutually recursive handles to each other they will never be dropped.
+### Input Events
 
-## Concurrency
+`.on_click(|event, window, cx: &mut App| ...)` — use `cx.listener(|this, event, window, cx| ...)` to update entity.
 
-All use of entities and UI rendering occurs on a single foreground thread.
+### Drag and Drop
 
-`cx.spawn(async move |cx| ...)` runs an async closure on the foreground thread. Within the closure, `cx` is `&mut AsyncApp`.
+**Pitfall:** `on_drag_move` fires for ALL handlers (Capture phase). Always check `event.bounds.contains(&event.event.position)`.
 
-When the outer cx is a `Context<T>`, the use of `spawn` instead looks like `cx.spawn(async move |this, cx| ...)`, where `this: WeakEntity<T>` and `cx: &mut AsyncApp`.
+### Actions
 
-To do work on other threads, `cx.background_spawn(async move { ... })` is used. Often this background task is awaited on by a foreground task which uses the results to update state.
+* `actions!(namespace, [Action1, Action2])` — define actions without data. `Action` derive macro for data.
+* Dispatch: `window.dispatch_action(action.boxed_clone(), cx)` or `focus_handle.dispatch_action(&action, window, cx)`
+* Handle: `.on_action(cx.listener(Self::handle_action))`
 
-Both `cx.spawn` and `cx.background_spawn` return a `Task<R>`, which is a future that can be awaited upon. If this task is dropped, then its work is cancelled. To prevent this one of the following must be done:
+### Key Bindings
 
-* Awaiting the task in some other async context.
-* Detaching the task via `task.detach()` or `task.detach_and_log_err(cx)`, allowing it to run indefinitely.
-* Storing the task in a field, if the work should be halted when the struct is dropped.
+* Format: `[ctrl-][alt-][shift-][cmd-]key` (e.g., `"ctrl-a"`, `"cmd-k left"`)
+* `KeyBinding::new("cmd-z", Undo, Some("Editor"))` — with context predicate
+* Context predicates: `"Editor"`, `"editor && vim_mode == normal"`, `"Workspace > Editor"`
+* Phases: Capture (root→focused) then Bubble (focused→root). `cx.stop_propagation()` to halt.
+* Tab not automatic — bind explicitly.
 
-A task which doesn't do anything but provide a value can be created with `Task::ready(value)`.
+### Notify
 
-## Elements
+`cx.notify()` — triggers rerender and `cx.observe` callbacks.
 
-The `Render` trait is used to render some state into an element tree that is laid out using flexbox layout. An `Entity<T>` where `T` implements `Render` is sometimes called a "view".
+### Entity Events
 
-Example:
-
-```
-struct TextWithBorder(SharedString);
-
-impl Render for TextWithBorder {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().border_1().child(self.0.clone())
-    }
-}
-```
-
-Since `impl IntoElement for SharedString` exists, it can be used as an argument to `child`. `SharedString` is used to avoid copying strings, and is either an `&'static str` or `Arc<str>`.
-
-UI components that are constructed just to be turned into elements can instead implement the `RenderOnce` trait, which is similar to `Render`, but its `render` method takes ownership of `self` and receives `&mut App` instead of `&mut Context<Self>`. Types that implement this trait can use `#[derive(IntoElement)]` to use them directly as children.
-
-The style methods on elements are similar to those used by Tailwind CSS.
-
-**Scrollable lists in flex containers:** When using `UniformList` or other scrollable elements inside a flex container, the container must have `.min_h_0()` to allow shrinking below content height. Without this, taffy allocates the full content height and scrolling won't work.
-
-If some attributes or children of an element tree are conditional, `.when(condition, |this| ...)` can be used to run the closure only when `condition` is true. Similarly, `.when_some(option, |this, value| ...)` runs the closure when the `Option` has a value.
-
-## Input events
-
-Input event handlers can be registered on an element via methods like `.on_click(|event, window, cx: &mut App| ...)`.
-
-Often event handlers will want to update the entity that's in the current `Context<T>`. The `cx.listener` method provides this - its use looks like `.on_click(cx.listener(|this: &mut T, event, window, cx: &mut Context<T>| ...)`.
-
-## Drag and Drop
-
-**Pitfall:** `on_drag_move` fires for ALL registered handlers (Capture phase). Always check bounds:
-
-```rust
-.on_drag_move::<DraggedItem>(cx.listener(|this, event: &DragMoveEvent<DraggedItem>, _window, cx| {
-    if event.bounds.contains(&event.event.position) {  // Required check!
-        this.drag_target = Some(DragTarget::Root);
-        cx.notify();
-    }
-}))
-```
-
-## Actions
-
-Actions are dispatched via user keyboard interaction or in code via `window.dispatch_action(SomeAction.boxed_clone(), cx)` or `focus_handle.dispatch_action(&SomeAction, window, cx)`.
-
-Actions with no data defined with the `actions!(some_namespace, [SomeAction, AnotherAction])` macro call. Otherwise the `Action` derive macro is used. Doc comments on actions are displayed to the user.
-
-Action handlers can be registered on an element via the event handler `.on_action(|action, window, cx| ...)`. Like other event handlers, this is often used with `cx.listener`.
-
-## Keyboard Shortcuts and Key Bindings
-
-Keystroke format: `[ctrl-][alt-][shift-][cmd-]key` (e.g., `"ctrl-a"`, `"cmd-k left"` for multi-keystroke)
-
-**Defining actions:**
-```rust
-actions!(editor, [MoveUp, MoveDown]);  // Simple actions
-```
-
-**Registering bindings and handlers:**
-```rust
-KeyBinding::new("cmd-z", UndoAction, Some("Editor"))  // With context predicate
-
-div()
-    .key_context("Editor")
-    .on_action(cx.listener(Self::handle_undo))
-    .on_key_down(cx.listener(|this, event, window, cx| { /* raw key */ }))
-```
-
-**Context predicates:** `"Editor"`, `"editor && vim_mode == normal"`, `"!(editor)"`, `"Workspace > Editor"`
-
-**Event phases:** Capture (root→focused) then Bubble (focused→root). Use `cx.stop_propagation()` to halt.
-
-**Tab handling:** Not automatic. Bind explicitly with `KeyBinding::new("tab", Tab, None)` and call `window.focus_next(cx)`.
-
-## Notify
-
-When a view's state has changed in a way that may affect its rendering, it should call `cx.notify()`. This will cause the view to be rerendered. It will also cause any observe callbacks registered for the entity with `cx.observe` to be called.
-
-## Entity events
-
-While updating an entity (`cx: Context<T>`), it can emit an event using `cx.emit(event)`. Entities register which events they can emit by declaring `impl EventEmitter<EventType> for EntityType {}`.
-
-Other entities can then register a callback to handle these events by doing `cx.subscribe(other_entity, |this, other_entity, event, cx| ...)`. This will return a `Subscription` which deregisters the callback when dropped.  Typically `cx.subscribe` happens when creating a new entity and the subscriptions are stored in a `_subscriptions: Vec<Subscription>` field.
+* `cx.emit(event)` — entity emits event. Declare: `impl EventEmitter<EventType> for Entity {}`
+* `cx.subscribe(entity, |this, entity, event, cx| ...)` → `Subscription` (store in `_subscriptions: Vec<Subscription>`)
 
 ## Session Management
 
-The terminal crate includes a session management system for persistent SSH/Telnet configurations (`crates/terminal/src/session_store.rs`).
-
-### Data Model
-
-- `SessionNode`: Enum representing either a `Group` or `Session` in a tree structure
-- `SessionGroup`: Folder containing other groups or sessions
-- `SessionConfig`: Session configuration with name, tags, and protocol-specific settings
-- `ProtocolConfig`: Enum for `Ssh` or `Telnet` configurations
-- `AuthMethod`: Authentication options (Interactive, Password, PrivateKey, Agent)
-
-### GPUI Integration
-
-- `SessionStoreEntity`: GPUI entity wrapping `SessionStore` with auto-save and event emission
-- `GlobalSessionStore`: Global marker for `cx.global()` access
-- `SessionStoreEvent`: Events for UI subscription (Changed, SessionAdded, SessionRemoved)
-
-**Usage:** `SessionStoreEntity::init(cx)` on startup, then `SessionStoreEntity::global(cx)` to access. Subscribe to `SessionStoreEvent` for changes.
-
-**Persistence:** `~/.config/bspterm/sessions.json`
+Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key types: `SessionNode` (Group|Session), `SessionConfig`, `ProtocolConfig` (Ssh|Telnet), `AuthMethod`. GPUI entity: `SessionStoreEntity::global(cx)`. Persistence: `~/.config/bspterm/sessions.json`.
 
 ## Telnet Connection
 
-The terminal crate includes a Telnet connection module (`crates/terminal/src/connection/telnet/`) for connecting to remote hosts via the Telnet protocol.
-
-### Module Structure
-
-```
-telnet/
-  mod.rs          # TelnetConfig, exports
-  protocol.rs     # Telnet IAC handling, option negotiation
-  session.rs      # TelnetSession - TCP connection management
-  terminal.rs     # TelnetTerminalConnection - implements TerminalConnection trait
-```
-
-### Protocol Implementation (`protocol.rs`)
-
-- **IAC Commands**: IAC (255), DO (253), DONT (254), WILL (251), WONT (252), SB (250), SE (240)
-- **Option Codes**: ECHO (1), SUPPRESS_GO_AHEAD (3), TERMINAL_TYPE (24), NAWS (31)
-- `TelnetNegotiator`: Parses IAC sequences and generates appropriate responses
-- `process_incoming()`: Separates terminal data from commands, returns protocol responses
-- `build_naws()`: Generates window size subnegotiation packet (RFC 1073)
-- IAC escaping: 255 255 → single 255
-
-### Key Types
-
-- `TelnetConfig`: Connection settings (host, port, username, password, encoding, terminal_type)
-- `TelnetSession`: TCP connection lifecycle management
-- `TelnetTerminalConnection`: Implements `TerminalConnection` trait (same interface as SSH)
-
-**Usage:** `TerminalBuilder::new_with_telnet(config, ...)` or `connect_telnet(config, workspace, pane, window, cx)`
+Telnet protocol in `crates/terminal/src/connection/telnet/` — `protocol.rs` (IAC negotiation), `session.rs` (TCP), `terminal.rs` (implements `TerminalConnection`). Usage: `TerminalBuilder::new_with_telnet(config, ...)`.
 
 ## Terminal Keybinding Interception
 
-The terminal view intercepts keystrokes to decide whether they should be sent to the shell or handled by Bspterm's action system (`crates/terminal_view/src/terminal_view.rs`).
+In `terminal_view.rs`, when `send_keybindings_to_shell` is enabled:
+- `keybindings_to_skip_shell` list → always handled by Bspterm
+- Only `"context": "Terminal"` keybindings are intercepted; global bindings go to shell
+- `terminal::SendKeystroke` and `terminal::SendText` always go to shell
+- Key functions: `should_skip_shell()`, `keystroke_has_bspterm_action_binding()`
 
-### Behavior
+## Terminal Grouped Tab Bar
 
-When `send_keybindings_to_shell` setting is enabled, keystrokes are intercepted and checked:
-
-1. **Explicit skip list**: Keystrokes in `keybindings_to_skip_shell` setting are always handled by Bspterm
-2. **Terminal-context bindings**: Only keybindings with `"context": "Terminal"` predicate are intercepted
-3. **Global bindings**: Keybindings without a Terminal context predicate are sent to the shell
-
-### Key Functions
-
-- `should_skip_shell()`: Main decision function combining all checks
-- `keystroke_has_bspterm_action_binding()`: Checks if keystroke has a Terminal-context keybinding
-- `predicate_contains_terminal()`: Recursively checks if a `KeyBindingContextPredicate` contains "Terminal"
-
-### Examples
-
-| Keystroke | Action | Context | Result |
-|-----------|--------|---------|--------|
-| `ctrl-p` | `menu::SelectPrevious` | Global | Sent to shell |
-| `ctrl-v` | `terminal::Paste` | Terminal | Intercepted by Bspterm |
-| `ctrl-c` | `terminal::SendKeystroke` | Terminal | Sent to shell (explicitly forwarded) |
-| `ctrl-shift-c` | `terminal::Copy` | Terminal | Intercepted by Bspterm |
-
-### Special Actions
-
-- `terminal::SendKeystroke` and `terminal::SendText` are always sent to the shell, even with Terminal context
-
-### Terminal Search
-
-Search functionality is available in the terminal via:
-- **Context menu**: Right-click → "Find" (uses `buffer_search::Deploy::find()`)
-- **Toolbar button**: Search icon (magnifying glass) in terminal panel tab bar
+When `group_tabs_by_session = true` in `terminal_panel.rs`:
+- `GroupKey`: `SessionGroup(uuid)`, `Ungrouped`, `Local`, `Other`
+- `group_overrides: HashMap<EntityId, GroupKey>` for manual assignments (drag between groups)
+- `apply_grouped_tab_bar_to_center_panes()` applies renderer to workspace center panes
 
 ## Terminal Gutter
 
-The terminal gutter displays line numbers, timestamps, and separator lines in the left margin (`crates/terminal_view/src/terminal_element.rs`, `crates/terminal_view/src/row_decorator.rs`).
-
-### Display Logic
-
-Both line numbers and timestamps only appear on lines that have actual content (terminal output). This is determined by checking `terminal.get_line_timestamp(grid_line)`:
-
-| Feature | Condition | Behavior |
-|---------|-----------|----------|
-| Line numbers | `get_line_timestamp().is_some()` | Only on lines with output |
-| Timestamps | `get_line_timestamp().is_some()` | Only on lines with output |
-| Empty lines | No timestamp | No gutter content displayed |
-| Gap separators | Timestamp gap >10s | Horizontal line between rows |
-
-### Row Decorator System
-
-The gutter supports pluggable decorations via the `RowDecorator` trait (`row_decorator.rs`):
-
-```rust
-pub trait RowDecorator: Send + Sync {
-    fn layout(&mut self, row_index: usize, grid_line: i32, terminal: &Terminal) -> Vec<RowDecoration>;
-    fn reset(&mut self);
-}
-```
-
-**Built-in Decorators:**
-- `TimestampGapDecorator`: Draws horizontal separator lines between output lines when the timestamp gap exceeds 10 seconds
-
-**Adding New Decorators:**
-1. Implement `RowDecorator` trait
-2. Add to painters vec in `TerminalElement::prepaint()`
-3. Decorations are collected in `layout_gutter()` and painted in `paint_gutter()`
-
-### Key Functions
-
-- `layout_gutter()`: Calculates gutter dimensions, creates `GutterLineEntry` for each visible row, and collects decorations from painters
-- `paint_gutter()`: Renders decorations, line numbers, and timestamps based on `GutterLineEntry` data
-- `get_line_timestamp()`: Returns `Option<DateTime>` indicating if a line has content
-
-### Settings
-
-- `gutter.line_numbers`: Enable/disable line numbers
-- `gutter.timestamps`: Enable/disable timestamps
-- `gutter.relative_line_numbers`: Show relative line numbers in vi mode
-- `gutter.timestamp_format`: Format string for timestamp display
+Gutter in `terminal_element.rs` and `row_decorator.rs`. Content only on lines with timestamps (`get_line_timestamp().is_some()`). `RowDecorator` trait for pluggable decorations. Settings: `gutter.line_numbers`, `gutter.timestamps`, `gutter.relative_line_numbers`, `gutter.timestamp_format`.
 
 ## Remote Explorer Panel
 
-The `remote_explorer` crate (`crates/remote_explorer`) provides a panel for browsing saved SSH/Telnet sessions in a tree view.
-
-### Architecture
-
-- Uses `UniformList` for virtual scrolling with flattened tree structure
-- Indentation via `ListItem.indent_level()` with `px(12.)` step size
-- Icons: `FolderOpen`/`Folder` for groups, `Server` for sessions
-- Subscribes to `SessionStoreEvent` for automatic updates
-
-### Key Components
-
-- `FlattenedEntry`: Flattened tree entry with `id`, `depth`, and `node`
-- `RemoteExplorer`: Main panel struct implementing `Panel`, `Focusable`, `Render`
-- `init(cx)`: Initializes `SessionStoreEntity` and registers `ToggleFocus` action
-- `load()`: Async loader for workspace panel initialization
-
-### Integration Points
-
-- **Actions**: `bspterm_actions::remote_explorer::ToggleFocus`, `ToggleCollapseAll`
-- **Menu**: View > Remote Explorer
-- **Icon**: Server icon in left dock
-- **Position**: Left or Right dock (default: Left)
-- **Priority**: `activation_priority = 10`
-
-### Title Bar Toggle Button
-
-The panel header has a single toggle button (VSCode-style) that switches between collapse/expand states:
-- Shows "Collapse All" tooltip when any group is expanded
-- Shows "Expand All" tooltip when all groups are collapsed
-- Uses dynamic VSCode-style icons: `CollapseAll` (minus sign) when expanded, `ExpandAll` (plus sign) when collapsed
-- `has_any_expanded_group()` method determines current state
-
-### Quick Add Area (`crates/remote_explorer/src/quick_add/`)
-
-Auto-recognize input supports flexible IP detection anywhere in the string with smart credential detection:
-
-| Format | Example | Result |
-|--------|---------|--------|
-| IP only | `192.168.1.1` | Telnet:23, grouped by IP |
-| IP:port | `192.168.1.1:22` | SSH:22, grouped by IP |
-| With credentials | `192.168.1.1 root pass` | Telnet with auth |
-| Smart credentials | `192.168.1.1 root123 Root@123` | user=root123, pass=Root@123 |
-| With label | `192.168.1.1 root Root@123 slot23` | Name includes "slot23" |
-| Name prefix | `管理网口192.168.1.1 huawei Admin@123` | Name=管理网口, with auth |
-| Multi-line | `6.6.62.23 slot23\nhuawei\nRouter@202508` | Single connection with credentials |
-| Bulk (环境/后台) | `环境192.168.1.1\troot\tpass` | Telnet, grouped by IP |
-
-**Session Grouping:** All quick-add sessions are automatically placed in a group named after the IP address.
-
-**Smart Token Classification:**
-- **Username**: Common names (root, admin, huawei, cisco) or names starting with them (root123)
-- **Password**: Contains special characters (@!#$%) or has complexity (mixed case + digits)
-- **Label**: Contains non-ASCII (中文) or alphanumeric mix (slot23)
-- **Port**: Pure digits 1-65535
-
-**Multi-line Format:** If input has multiple lines but only the first contains an IP, subsequent lines are parsed as credentials.
-
-**Credential separators:** tab, slash, or space. **Bulk import:** `环境` = Telnet, `后台` = SSH.
-
-**Recognition Config:** Rules are defined in `~/.config/bspterm/recognize_config.json`, which is auto-installed from embedded defaults on every startup (`crates/terminal/src/recognize_config.rs`).
+`crates/remote_explorer` — tree view of sessions using `UniformList`. Action: `bspterm_actions::remote_explorer::ToggleFocus`. Default position: Left dock. Quick Add (`src/quick_add/`): auto-recognizes IP with credentials from flexible input formats. Recognition config: `~/.config/bspterm/recognize_config.json` (auto-installed from `crates/terminal/src/recognize_config.rs`).
 
 ## Terminal Reconnection
 
-The terminal supports reconnecting to SSH/Telnet sessions while preserving scrollback history (`crates/terminal/src/terminal.rs`, `crates/terminal_view/src/terminal_view.rs`).
-
-### Architecture
-
-When reconnecting, the existing `Terminal` entity is reused rather than creating a new one:
-- The `Term` object (which holds the scrollback buffer) is never replaced
-- A new connection is created using the stored `events_tx` sender
-- The new connection sends events through the same channel to the existing `Term`
-
-### Key Components
-
-- `events_tx: UnboundedSender<AlacTermEvent>`: Stored in Terminal struct for reuse during reconnection
-- `Terminal::reconnect(&self, cx: &App) -> Task<Result<Box<dyn TerminalConnection>>>`: Creates new SSH/Telnet connection using existing `events_tx` and current terminal size
-- `Terminal::set_connection(&mut self, connection: Box<dyn TerminalConnection>)`: Updates terminal to use new connection
-- `TerminalView::reconnect_terminal()`: Orchestrates reconnection, prints status messages
-
-### Reconnection Flow
-
-1. User triggers reconnect → "Connecting..." printed
-2. `terminal.reconnect(cx)` creates new connection with existing `events_tx`
-3. On success: `terminal.set_connection(connection)` updates terminal
-4. Scrollback history remains intact throughout
+Reconnects SSH/Telnet preserving scrollback. Reuses existing `Terminal` entity and `events_tx` sender — `Term` object (scrollback buffer) is never replaced. Key: `Terminal::reconnect()`, `Terminal::set_connection()`, `TerminalView::reconnect_terminal()`.
 
 ## Editor Panel
 
-The `editor_panel` crate (`crates/editor_panel`) provides a dockable panel for code editing, similar to the main editor but positioned in a dock.
-
-### Architecture
-
-- Wraps a `Pane` containing editor items
-- Auto-closes when the last tab is closed (matches TerminalPanel behavior)
-- Supports tab bar display and pane splitting
-
-### Key Components
-
-- `EditorPanel`: Main panel struct implementing `Panel`, `Focusable`, `Render`
-- `new_editor_pane()`: Creates a configured pane for the editor panel
-- `init(cx)`: Registers `ToggleFocus` action
-
-### Integration Points
-
-- **Action**: `editor_panel::ToggleFocus`
-- **Position**: Left, Right, or Bottom dock (default: Right)
-- **Auto-close**: Panel closes automatically when last tab is closed
+`crates/editor_panel` — dockable editor panel wrapping a `Pane`. Action: `editor_panel::ToggleFocus`. Auto-closes when last tab closes.
 
 ## Terminal Python Scripting
 
-Python scripts automate terminal sessions via Unix socket JSON-RPC (`crates/terminal_scripting/`, `crates/script_panel/`).
+Unix socket JSON-RPC in `crates/terminal_scripting/` and `crates/script_panel/`.
 
-### JSON-RPC Methods
+Methods: `session.current`, `session.list`, `session.create_ssh`, `session.create_telnet`, `terminal.send`, `terminal.read`, `terminal.wait_for`, `terminal.run`, `terminal.close`
 
-`session.current`, `session.list`, `session.create_ssh`, `session.create_telnet`, `terminal.send`, `terminal.read`, `terminal.wait_for`, `terminal.run`, `terminal.close`
-
-### Python Client (`assets/scripts/bspterm.py`)
-
-```python
-from bspterm import current_terminal, SSH, Telnet, params
-
-# Focused terminal
-term = current_terminal()
-output = term.run("ls -la")
-
-# Background SSH
-term = SSH.connect("192.168.1.1", user="root", password="secret")
-term.wait_for("$")
-term.run("hostname")
-term.close()
-
-# Access script parameters (see Script Parameters below)
-host = params.host
-port = params.get("port", 22)
-```
-
-### Script Panel
-
-- **Action**: `bspterm_actions::script_panel::ToggleFocus`
-- **Position**: Left or Right dock (default: Left)
-- **Scripts**: `~/.config/bspterm/scripts/*.py`
-- **Env vars**: `BSPTERM_SOCKET`, `BSPTERM_CURRENT_TERMINAL`, `BSPTERM_PARAM_*`
-
-### Script Parameters
-
-Scripts can declare parameters using the `@params` block in their docstring. When such a script is run, a modal dialog prompts the user for input before execution.
-
-**Parameter Declaration Format:**
-
-```python
-"""
-Script description
-
-@params
-- host: string
-  description: Target IP address
-  required: true
-  default: "192.168.1.1"
-
-- port: number
-  description: Connection port
-  default: 22
-
-- protocol: choice
-  description: Connection protocol
-  choices: ["SSH", "Telnet"]
-  default: "SSH"
-
-- password: password
-  description: Device password
-  required: true
-
-- verbose: boolean
-  description: Enable verbose output
-  default: false
-@end_params
-"""
-
-from bspterm import params
-
-host = params.host          # Direct access
-port = params.get("port", 22)  # With default
-```
-
-**Parameter Types:**
-
-| Type | UI Control | Description |
-|------|------------|-------------|
-| `string` | Text input | Plain text |
-| `number` | Text input + validation | Numeric value |
-| `boolean` | Checkbox | True/false toggle |
-| `choice` | Button group | Select from predefined options |
-| `password` | Text input | Sensitive input |
-
-**Metadata Fields:**
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `description` | No | Label displayed in UI |
-| `required` | No | If true, field must be filled (default: false) |
-| `default` | No | Default value |
-| `choices` | Yes for choice type | List of options `["A", "B"]` |
-
-**Implementation Files:**
-- `crates/script_panel/src/script_params.rs` - Parameter parsing
-- `crates/script_panel/src/script_params_modal.rs` - UI modal
-
-**Example Scripts with Parameters:**
-- `assets/scripts/disp_boa.py` - Simple example: sends `disp boa {slotid}` command (slotid is required string param)
-- `assets/scripts/example_with_params.py` - Comprehensive example demonstrating all parameter types
+Python client: `assets/scripts/bspterm.py`. Scripts in `~/.config/bspterm/scripts/*.py`. Scripts can declare `@params` blocks in docstrings for modal parameter input (types: string, number, boolean, choice, password). See `crates/script_panel/src/script_params.rs`.
 
 ## Terminal Automation Rules
 
-Rule-based automation for auto-login (`crates/terminal/src/rule_store.rs`, `crates/terminal/src/rule_engine.rs`, `crates/rule_editor/`).
-
-### Data Structures
-
-- `AutomationRule`: id, name, enabled, trigger, max_triggers, condition, action
-- `TriggerEvent`: Wakeup (output received), Connected, Disconnected
-- `RuleCondition`: Pattern, ConnectionType, All (AND), Any (OR)
-- `RuleAction`: SendText, SendCredential, RunPython, Sequence, Delay
-
-### RuleEngine
-
-```rust
-let engine = RuleEngine::new(&connection_info, &rules);
-let actions = engine.check(TriggerEvent::Wakeup, &screen_content);
-```
-
-**Features:** Pre-compiled regex, 2s cooldown, `max_triggers` limit per connection.
-
-### Terminal Integration
-
-- `init_rule_engine()`: Called on connection established
-- `check_rules(trigger, cx)`: Called on Wakeup and connection state changes
-
-### Rule Editor Panel
-
-- **Action**: `bspterm_actions::rule_editor::ToggleFocus`
-- **Position**: Right dock
-
-**Persistence:** `~/.config/bspterm/terminal_rules.json`
-**Defaults:** `assets/settings/default_terminal_rules.json`
-
-**Test:** `cargo test -p terminal rule_engine`
-
-## Highlight Editor Panel
-
-The `highlight_editor` crate (`crates/highlight_editor`) provides a panel for managing terminal semantic highlighting rules.
-
-### Architecture
-
-- Uses `UniformList` for virtualized scrolling of rules
-- Subscribes to `HighlightStoreEvent` for real-time updates
-- Implements `Panel`, `Focusable`, `Render` traits
-
-### Module Structure
-
-```
-src/
-├── highlight_editor.rs      # Main panel with rule list
-└── highlight_edit_modal.rs  # Modal for creating/editing rules
-```
-
-### Key Components
-
-- `HighlightEditor`: Main panel struct with master toggle and rule list
-- `HighlightEditModal`: Modal dialog for rule editing with live regex preview
-
-### UI Features
-
-| Feature | Description |
-|---------|-------------|
-| Master Toggle | Enable/disable all highlighting globally |
-| Rule List | Shows name, pattern, token type, protocol, color preview |
-| Live Regex Validation | Shows Valid/Invalid indicator while typing pattern |
-| Match Count Preview | Displays number of matches in sample text |
-| Color Swatches | Visual preview of hex foreground/background colors |
-| Token Type Selector | Error, Warning, Info, Debug, Success, Timestamp, IP, URL, Path, Number |
-| Protocol Selector | All, SSH, Telnet, Local |
-| Modifier Checkboxes | Bold, Italic, Underline, Dim |
-
-### Integration Points
-
-- **Action**: `bspterm_actions::highlight_editor::ToggleFocus`
-- **Position**: Right dock (priority: 12)
-- **Icon**: Sparkle icon
-
-**Persistence:** Uses `HighlightStoreEntity` from terminal crate (`~/.config/bspterm/highlight_rules.json`)
-
-## Terminal Abbreviations
-
-Command abbreviation system for quick input expansion (`crates/terminal/src/abbr_store.rs`, `crates/terminal_view/src/abbr_bar.rs`).
-
-### Data Structures
-
-- `AbbreviationProtocol`: Protocol filter enum (`All`, `Ssh`, `Telnet`)
-- `Abbreviation`: Trigger word, expansion text, enabled flag, and protocol filter
-- `AbbreviationStore`: Collection of abbreviations with global settings
-- `AbbreviationStoreEntity`: GPUI entity with auto-save and event emission
-
-### Protocol Filtering
-
-Abbreviations can be scoped to specific connection types:
-
-| Protocol | Matches |
-|----------|---------|
-| `All` | All terminals (local, SSH, Telnet) |
-| `Ssh` | SSH connections only |
-| `Telnet` | Telnet connections only |
-
-```rust
-let protocol = terminal.get_current_protocol(); // Some(Ssh), Some(Telnet), or None
-let abbr = store.find_by_trigger("g", protocol.as_ref());
-let visible = store.abbreviations_for_protocol(protocol.as_ref());
-```
-
-### Expansion Behavior
-
-1. User types trigger word followed by space or Enter
-2. Terminal checks if word is at command position (first word or after `|`, `&&`, etc.)
-3. Abbreviation lookup filters by current terminal's protocol
-4. If matched: trigger is replaced with expansion text
-
-### UI Components
-
-- **Abbr Bar**: Shows protocol-filtered abbreviations for current terminal
-- **Add Modal**: Protocol selector defaults to current terminal's connection type
-- **Edit Modal**: Allows changing abbreviation's protocol
-- **Config Modal**: Lists all abbreviations with protocol labels
-
-**Persistence:** `~/.config/bspterm/abbreviations.json`
+Rule engine in `crates/terminal/src/rule_engine.rs` and `rule_store.rs`. Types: `AutomationRule`, `TriggerEvent` (Wakeup/Connected/Disconnected), `RuleCondition` (Pattern/ConnectionType/All/Any), `RuleAction` (SendText/SendCredential/RunPython/Sequence/Delay). Features: pre-compiled regex, 2s cooldown, `max_triggers`. Panel: `crates/rule_editor/`. Persistence: `~/.config/bspterm/terminal_rules.json`. Test: `cargo test -p terminal rule_engine`.
 
 ## Terminal Semantic Highlighting
 
-Regex-based semantic highlighting for terminal output (`crates/terminal/src/highlight_rule.rs`, `crates/terminal/src/highlight_store.rs`, `crates/terminal/src/terminal_lsp.rs`).
+Regex-based highlighting in `crates/terminal/src/highlight_rule.rs`, `highlight_store.rs`, `terminal_lsp.rs`. Key types: `HighlightRule`, `TerminalTokenType`, `HighlightProtocol` (All/Ssh/Telnet/Local). Engine: `compute_line_tokens()` with priority-based evaluation. Editor panel: `crates/highlight_editor/`. Persistence: `~/.config/bspterm/highlight_rules.json`. Defaults: `assets/settings/default_highlight_rules.json`.
 
-### Data Structures
+## Terminal Abbreviations
 
-- `TerminalTokenType`: Semantic token types (Error, Warning, Info, Debug, Timestamp, IpAddress, Url, Path, Number, Success, Custom)
-- `TerminalTokenModifiers`: Bitfield for styles (Bold, Italic, Underline, Dim, Strikethrough)
-- `HighlightProtocol`: Protocol filter enum (`All`, `Ssh`, `Telnet`, `Local`)
-- `HighlightRule`: Rule definition with pattern, token type, modifiers, priority, colors, protocol filter
-- `SemanticToken`: Highlighted region with position (line, start_col, length) and styling
-
-### HighlightStore
-
-- `HighlightStore`: Rule collection with version, enabled flag, CRUD operations
-- `HighlightStoreEntity`: GPUI entity with auto-save and event emission
-- `HighlightStoreEvent`: Events (Changed, RuleAdded, RuleRemoved, HighlightingToggled)
-
-**Usage:** `HighlightStoreEntity::init(cx)` on startup, then `HighlightStoreEntity::global(cx)` to access.
-
-### TerminalLanguageServer
-
-Pattern matching engine in `terminal_lsp.rs`:
-- `CompiledRule`: Pre-compiled regex with case-insensitivity support
-- `compute_line_tokens()`: Match rules against line, return `Vec<SemanticToken>`
-- Priority-based evaluation (higher priority first, no overlapping tokens)
-- Protocol filtering for connection-specific rules
-
-### Default Rules
-
-| Rule | Priority | Pattern Example |
-|------|----------|-----------------|
-| Error keywords | 100 | `\b(error|fail(ed)?|fatal|critical)\b` |
-| Warning keywords | 90 | `\b(warn(ing)?|caution|deprecated)\b` |
-| Success keywords | 85 | `\b(success(ful)?|passed|ok|done)\b` |
-| IPv4 Address | 60 | `\b(?:\d{1,3}\.){3}\d{1,3}\b` |
-| URL | 55 | `https?://[^\s<>"']+` |
-| ISO Timestamp | 50 | `\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}` |
-| Unix Path | 40 | `(?:/[a-zA-Z0-9._-]+)+` |
-
-### Default Colors
-
-| Token Type | Color |
-|------------|-------|
-| Error | `#e06c75` (red) |
-| Warning | `#e5c07b` (yellow) |
-| Success | `#98c379` (green) |
-| Info | `#61afef` (blue) |
-| Debug | `#c678dd` (purple) |
-| Timestamp | `#5c6370` (gray) |
-| IP Address | `#d19a66` (orange) |
-| URL | `#56b6c2` (cyan, underlined) |
-
-### Rendering Integration
-
-In `terminal_element.rs`:
-1. `compute_semantic_tokens()`: Extract text from cells, create LSP server, compute tokens
-2. During cell rendering, lookup matching token at position
-3. Apply token's foreground color and modifiers (bold, italic, underline)
-
-**Persistence:** `~/.config/bspterm/highlight_rules.json`
-**Defaults:** `assets/settings/default_highlight_rules.json`
+Command expansion in `crates/terminal/src/abbr_store.rs` and `crates/terminal_view/src/abbr_bar.rs`. Trigger word + space/Enter at command position → expansion. Protocol-scoped (All/Ssh/Telnet). Persistence: `~/.config/bspterm/abbreviations.json`.
 
 ## Agent Connection Fallback
 
-The `agent_servers` crate (`crates/agent_servers/`) provides fallback mechanisms when the ACP (Agent Client Protocol) fails to connect.
-
-### Module Structure
-
-```
-src/
-├── agent_servers.rs    # Main module, exports, AgentServer trait
-├── acp.rs              # ACP protocol implementation, connect_with_fallback
-├── claude.rs           # Claude Code agent server
-├── terminal_mode.rs    # Terminal fallback connection
-├── prompt_mode.rs      # --prompt flag fallback connection
-├── codex.rs            # Codex agent server
-├── gemini.rs           # Gemini agent server
-└── custom.rs           # Custom agent servers
-```
-
-### Connection Modes
-
-| Mode | Description |
-|------|-------------|
-| `auto` (default) | Tries ACP first, falls back to Terminal mode on failure |
-| `acp` | Use ACP JSON-RPC over stdio (standard protocol) |
-| `terminal` | Run agent in a terminal, interact via text input |
-| `prompt` | Spawn new process with `--prompt` flag for each message |
-
-### Key Types
-
-- `ConnectionMode`: Enum defining connection strategies (`Auto`, `Acp`, `Terminal`, `Prompt`)
-- `TerminalModeConnection`: Runs agent in a terminal and sends text
-- `PromptModeConnection`: Spawns subprocess with `--prompt` for each message
-- `AcpConnectionError`: Detailed error types for ACP failures
-
-### connect_with_fallback (`acp.rs`)
-
-```rust
-pub async fn connect_with_fallback(
-    server_name: SharedString,
-    command: AgentServerCommand,
-    root_dir: &Path,
-    default_mode: Option<SessionModeId>,
-    default_model: Option<ModelId>,
-    default_config_options: HashMap<String, String>,
-    is_remote: bool,
-    connection_mode: ConnectionMode,
-    cx: &mut AsyncApp,
-) -> Result<Rc<dyn AgentConnection>>
-```
-
-**Behavior:**
-- `Auto`: Tries ACP → on failure logs warning and falls back to Terminal
-- `Acp`/`Terminal`/`Prompt`: Uses specified mode directly
-
-### Settings Configuration
-
-```json
-{
-  "agent_servers": {
-    "claude": {
-      "connection_mode": "auto"
-    }
-  }
-}
-```
-
-**File:** `crates/settings_content/src/agent.rs` defines `ConnectionMode` enum and `BuiltinAgentServerSettings.connection_mode` field.
-
-### When to Use Fallback Modes
-
-| Scenario | Recommended Mode |
-|----------|------------------|
-| Agent supports ACP | `auto` or `acp` |
-| Agent outputs non-JSON to stdout | `terminal` |
-| Agent has hooks that pollute stdout | `terminal` |
-| Agent only supports `--prompt` flag | `prompt` |
-| Each request should be isolated | `prompt` |
-
-### Logging
-
-When ACP fails, detailed logs help diagnose the issue:
-
-```
-[INFO] Connecting to agent 'codeagent' with auto mode (trying ACP first)...
-[WARN] ACP connection failed for 'codeagent': expected JSON-RPC response...
-[INFO] Attempting Terminal mode fallback for 'codeagent'...
-[INFO] Terminal mode connection established for 'codeagent'
-```
+`crates/agent_servers/` — connection modes: `auto` (ACP→Terminal fallback), `acp`, `terminal`, `prompt`. Config in `crates/settings_content/src/agent.rs` (`ConnectionMode` enum). Use `terminal` mode when agent outputs non-JSON to stdout.
 
 ## Base Keymap Configuration
 
-The base keymap setting has been simplified to only support two options (`crates/settings/src/base_keymap_setting.rs`):
-
-| Option | Description |
-|--------|-------------|
-| `VSCode` (default) | VS Code-style keybindings |
-| `None` | No base keymap, only user-defined bindings |
-
-Other editor keymaps (JetBrains, Sublime Text, Atom, Emacs, Cursor, TextMate) have been removed.
-
-**Keymap Files Kept:**
-- `assets/keymaps/default-linux.json`
-- `assets/keymaps/default-macos.json`
-- `assets/keymaps/default-windows.json`
-- `assets/keymaps/vim.json`
-- `assets/keymaps/initial.json`
-- `assets/keymaps/storybook.json`
+Two options in `crates/settings/src/base_keymap_setting.rs`: `VSCode` (default) and `None`. Keymap files: `assets/keymaps/default-{linux,macos,windows}.json`, `vim.json`, `initial.json`.
 
 ## Zed 遗留命名
-
-以下模块/文件保留了 Zed 命名，这是历史原因造成的：
 
 | 路径 | 说明 |
 |------|------|

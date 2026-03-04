@@ -2685,6 +2685,7 @@ print(output)
         let terminal_title = self.terminal.read(cx).title(false);
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         let buffer_title = format!("Terminal Export - {} - {}", terminal_title, timestamp);
+        let group_key = self.group_key(cx);
 
         let workspace = self.workspace.clone();
 
@@ -2707,7 +2708,14 @@ print(output)
                 editor
             });
 
+            let editor_item_id = editor.entity_id();
+
             workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<TerminalPanel>(cx) {
+                    panel.update(cx, |panel, _cx| {
+                        panel.register_item_group(editor_item_id, group_key.clone());
+                    });
+                }
                 workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
             });
         });
@@ -3317,7 +3325,7 @@ print(output)
     }
 
     /// Get the session group info for notification grouping.
-    fn get_session_group_info(&self, cx: &App) -> (Option<uuid::Uuid>, Option<String>) {
+    pub fn get_session_group_info(&self, cx: &App) -> (Option<uuid::Uuid>, Option<String>) {
         let connection_info = self.terminal.read(cx).connection_info();
 
         // Extract session_id from connection info
@@ -3338,6 +3346,17 @@ print(output)
         }
 
         (None, None)
+    }
+
+    pub fn group_key(&self, cx: &App) -> terminal_panel::GroupKey {
+        let (group_id, _) = self.get_session_group_info(cx);
+        let is_remote = self.terminal.read(cx).connection_info().is_some();
+
+        match group_id {
+            Some(id) => terminal_panel::GroupKey::SessionGroup(id),
+            None if is_remote => terminal_panel::GroupKey::Ungrouped,
+            None => terminal_panel::GroupKey::Local,
+        }
     }
 
     fn rerun_button(task: &TaskState) -> Option<IconButton> {
