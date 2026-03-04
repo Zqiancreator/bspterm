@@ -102,7 +102,7 @@ use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     get_action_label, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
     ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol, FunctionStoreEntity,
-    FunctionStoreEvent, ShortcutBarStoreEntity, ShortcutBarStoreEvent, ALL_SYSTEM_ACTIONS,
+    ShortcutBarStoreEntity, ShortcutBarStoreEvent, ALL_SYSTEM_ACTIONS,
 };
 use shortcut_bar::get_keybindings_for_action;
 use terminal_scripting::{ScriptingServer, TerminalRegistry};
@@ -138,6 +138,35 @@ impl Render for DraggedButtonView {
 enum ButtonDragTarget {
     Before { button_id: uuid::Uuid },
     After { button_id: uuid::Uuid },
+}
+
+#[derive(Clone)]
+struct DraggedFunction {
+    id: uuid::Uuid,
+    name: String,
+}
+
+struct DraggedFunctionView {
+    name: String,
+}
+
+impl Render for DraggedFunctionView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(cx.theme().colors().element_background)
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .child(div().text_sm().child(self.name.clone()))
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum FunctionDragTarget {
+    Before { function_id: uuid::Uuid },
+    After { function_id: uuid::Uuid },
 }
 
 #[derive(Clone)]
@@ -291,6 +320,10 @@ pub struct TerminalView {
     _abbr_store_subscription: Option<Subscription>,
     /// Currently selected abbreviation for context menu operations
     selected_abbr: Option<uuid::Uuid>,
+    /// Currently selected function for context menu operations
+    selected_function: Option<uuid::Uuid>,
+    /// Drag target for function bar reordering
+    function_drag_target: Option<FunctionDragTarget>,
     _shortcut_bar_subscription: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
     _terminal_subscriptions: Vec<Subscription>,
@@ -505,6 +538,8 @@ impl TerminalView {
             button_drag_target: None,
             _abbr_store_subscription: abbr_store_subscription,
             selected_abbr: None,
+            selected_function: None,
+            function_drag_target: None,
             _shortcut_bar_subscription: shortcut_bar_subscription,
             _subscriptions: subscriptions,
             _terminal_subscriptions: terminal_subscriptions,
@@ -1725,6 +1760,68 @@ print(output)
         self.context_menu = Some((context_menu, position, subscription));
     }
 
+    fn deploy_function_context_menu(
+        &mut self,
+        func_id: uuid::Uuid,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selected_function = Some(func_id);
+
+        let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
+            menu.context(self.focus_handle.clone())
+                .action(t("common.edit"), Box::new(EditFunction))
+                .action(t("common.delete"), Box::new(DeleteFunction))
+        });
+
+        window.focus(&context_menu.focus_handle(cx), cx);
+        let subscription = cx.subscribe_in(
+            &context_menu,
+            window,
+            |this, _, _: &DismissEvent, window, cx| {
+                if this.context_menu.as_ref().is_some_and(|context_menu| {
+                    context_menu.0.focus_handle(cx).contains_focused(window, cx)
+                }) {
+                    cx.focus_self(window);
+                }
+                this.context_menu.take();
+                cx.notify();
+            },
+        );
+
+        self.context_menu = Some((context_menu, position, subscription));
+    }
+
+    fn deploy_function_bar_context_menu(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
+            menu.context(self.focus_handle.clone())
+                .action(t("function.add_title"), Box::new(AddFunction))
+        });
+
+        window.focus(&context_menu.focus_handle(cx), cx);
+        let subscription = cx.subscribe_in(
+            &context_menu,
+            window,
+            |this, _, _: &DismissEvent, window, cx| {
+                if this.context_menu.as_ref().is_some_and(|context_menu| {
+                    context_menu.0.focus_handle(cx).contains_focused(window, cx)
+                }) {
+                    cx.focus_self(window);
+                }
+                this.context_menu.take();
+                cx.notify();
+            },
+        );
+
+        self.context_menu = Some((context_menu, position, subscription));
+    }
+
     fn render_abbr_bar(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(store) = AbbreviationStoreEntity::try_global(cx) else {
             return h_flex().id("terminal-abbr-bar").into_any_element();
@@ -1847,6 +1944,7 @@ print(output)
             .collect();
         let function_enabled = store.read(cx).function_enabled();
         let terminal = self.terminal.clone();
+        let terminal_view_handle = cx.entity().downgrade();
 
         h_flex()
             .id("terminal-function-bar")
@@ -1857,6 +1955,28 @@ print(output)
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().surface_background)
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.deploy_function_bar_context_menu(event.position, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_drag_move::<DraggedFunction>(cx.listener(
+                |this, event: &DragMoveEvent<DraggedFunction>, _, cx| {
+                    if !event.bounds.contains(&event.event.position) {
+                        if this.function_drag_target.is_some() {
+                            this.function_drag_target = None;
+                            cx.notify();
+                        }
+                    }
+                },
+            ))
+            .on_drop(cx.listener(
+                |this, dragged: &DraggedFunction, _window, cx| {
+                    this.handle_function_drop(dragged, cx);
+                },
+            ))
             .child(
                 div()
                     .text_xs()
@@ -1864,32 +1984,119 @@ print(output)
                     .child(t("function.label")),
             )
             .children(functions.iter().map(|func| {
+                let func_id = func.id;
                 let func_name = func.name.clone();
                 let func_name_display = func_name.clone();
                 let terminal = terminal.clone();
+                let terminal_view_handle = terminal_view_handle.clone();
+                let terminal_view_handle_for_menu = terminal_view_handle.clone();
+                let drag_data = DraggedFunction {
+                    id: func_id,
+                    name: func_name.clone(),
+                };
+                let is_before_target =
+                    self.function_drag_target == Some(FunctionDragTarget::Before { function_id: func_id });
+                let is_after_target =
+                    self.function_drag_target == Some(FunctionDragTarget::After { function_id: func_id });
 
-                div()
-                    .id(SharedString::from(format!("func-tag-{}", func.id)))
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded_sm()
-                    .bg(cx.theme().colors().element_background)
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .hover(|s| s.bg(cx.theme().colors().element_hover))
-                    .cursor_pointer()
-                    .on_click(move |_, _window, cx| {
-                        // Insert function name into terminal input
-                        terminal.update(cx, |term, _| {
-                            term.input(func_name.as_bytes().to_vec());
-                            term.input(b" ".to_vec());
-                        });
+                h_flex()
+                    .items_center()
+                    .when(is_before_target, |this| {
+                        this.child(
+                            div()
+                                .w(px(2.0))
+                                .h_4()
+                                .rounded_sm()
+                                .bg(cx.theme().colors().text_accent),
+                        )
                     })
                     .child(
                         div()
-                            .text_xs()
-                            .child(func_name_display),
+                            .id(SharedString::from(format!("func-tag-container-{}", func_id)))
+                            .on_drag(drag_data, move |drag_data, _, _, cx| {
+                                cx.new(|_| DraggedFunctionView {
+                                    name: drag_data.name.clone(),
+                                })
+                            })
+                            .on_drag_move::<DraggedFunction>(cx.listener(
+                                move |this,
+                                      event: &DragMoveEvent<DraggedFunction>,
+                                      _window,
+                                      cx| {
+                                    if !event.bounds.contains(&event.event.position) {
+                                        return;
+                                    }
+                                    let dragged = event.drag(cx);
+                                    if dragged.id == func_id {
+                                        this.function_drag_target = None;
+                                        cx.notify();
+                                        return;
+                                    }
+                                    let mouse_x = event.event.position.x - event.bounds.origin.x;
+                                    let is_after = mouse_x > event.bounds.size.width / 2.0;
+                                    this.function_drag_target = Some(if is_after {
+                                        FunctionDragTarget::After { function_id: func_id }
+                                    } else {
+                                        FunctionDragTarget::Before { function_id: func_id }
+                                    });
+                                    cx.notify();
+                                },
+                            ))
+                            .on_drop(cx.listener(
+                                move |this, dragged: &DraggedFunction, _window, cx| {
+                                    this.handle_function_drop(dragged, cx);
+                                },
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                move |event: &MouseDownEvent, window, cx| {
+                                    terminal_view_handle_for_menu
+                                        .update(cx, |this, cx| {
+                                            this.deploy_function_context_menu(
+                                                func_id,
+                                                event.position,
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                        .ok();
+                                    cx.stop_propagation();
+                                },
+                            )
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("func-tag-{}", func_id)))
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_sm()
+                                    .bg(cx.theme().colors().element_background)
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .hover(|s| s.bg(cx.theme().colors().element_hover))
+                                    .cursor_pointer()
+                                    .on_click(move |_, _window, cx| {
+                                        // Insert function name into terminal input
+                                        terminal.update(cx, |term, _| {
+                                            term.input(func_name.as_bytes().to_vec());
+                                            term.input(b" ".to_vec());
+                                        });
+                                    })
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .child(func_name_display),
+                                    ),
+                            ),
                     )
+                    .when(is_after_target, |this| {
+                        this.child(
+                            div()
+                                .w(px(2.0))
+                                .h_4()
+                                .rounded_sm()
+                                .bg(cx.theme().colors().text_accent),
+                        )
+                    })
                     .into_any_element()
             }))
             .child(div().flex_1())
@@ -1967,6 +2174,63 @@ print(output)
                 });
             })
             .ok();
+    }
+
+    fn edit_function(&mut self, _: &EditFunction, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(func_id) = self.selected_function.take() else {
+            return;
+        };
+
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    EditFunctionModal::new(func_id, window, cx)
+                });
+            })
+            .ok();
+    }
+
+    fn delete_function(&mut self, _: &DeleteFunction, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(func_id) = self.selected_function.take() else {
+            return;
+        };
+        let Some(store) = FunctionStoreEntity::try_global(cx) else {
+            return;
+        };
+
+        store.update(cx, |store, cx| {
+            store.remove_function(func_id, cx);
+        });
+    }
+
+    fn handle_function_drop(&mut self, dragged: &DraggedFunction, cx: &mut Context<Self>) {
+        let Some(target) = self.function_drag_target.take() else {
+            return;
+        };
+        cx.notify();
+
+        let Some(store) = FunctionStoreEntity::try_global(cx) else {
+            return;
+        };
+
+        let target_function_id = match &target {
+            FunctionDragTarget::Before { function_id } => *function_id,
+            FunctionDragTarget::After { function_id } => *function_id,
+        };
+
+        let functions = store.read(cx).functions();
+        let Some(target_index) = functions.iter().position(|f| f.id == target_function_id) else {
+            return;
+        };
+
+        let new_index = match target {
+            FunctionDragTarget::After { .. } => target_index + 1,
+            FunctionDragTarget::Before { .. } => target_index,
+        };
+
+        store.update(cx, |store, cx| {
+            store.move_function(dragged.id, new_index, cx);
+        });
     }
 
     fn toggle_function_enabled(
@@ -3602,6 +3866,8 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::toggle_function_bar))
             .on_action(cx.listener(Self::configure_function_bar))
             .on_action(cx.listener(Self::add_function))
+            .on_action(cx.listener(Self::edit_function))
+            .on_action(cx.listener(Self::delete_function))
             .on_action(cx.listener(Self::toggle_function_enabled))
             .on_action(cx.listener(Self::toggle_shortcut_bar))
             .on_action(cx.listener(Self::configure_shortcut_bar))

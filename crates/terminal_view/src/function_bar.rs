@@ -3,14 +3,21 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, Styled, Subscription, Window,
 };
+use ui::Tooltip;
 use i18n::t;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use terminal::{
     FunctionConfig, FunctionProtocol, FunctionStoreEntity, FunctionStoreEvent,
 };
 use uuid::Uuid;
 use ui::{FluentBuilder, IconButton, IconName, IconSize, Label, Switch, TintColor, ToggleState, prelude::*};
 use workspace::ModalView;
+
+/// Information about a script file.
+struct ScriptInfo {
+    name: String,
+    path: PathBuf,
+}
 
 /// Configuration modal for the function bar.
 pub struct FunctionBarConfigModal {
@@ -44,13 +51,61 @@ impl FunctionBarConfigModal {
         cx.emit(DismissEvent);
     }
 
-    fn toggle_function(id: Uuid, enabled: bool, cx: &mut App) {
+    fn scan_scripts(scripts_dir: &Path) -> Vec<ScriptInfo> {
+        let mut scripts = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(scripts_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().is_some_and(|n| n == "bspterm.py") {
+                    continue;
+                }
+                if path.extension().is_some_and(|ext| ext == "py") {
+                    if let Some(name) = path.file_stem() {
+                        scripts.push(ScriptInfo {
+                            name: name.to_string_lossy().to_string(),
+                            path,
+                        });
+                    }
+                }
+            }
+        }
+        scripts.sort_by(|a, b| a.name.cmp(&b.name));
+        scripts
+    }
+
+    fn toggle_script(script_path: PathBuf, enabled: bool, cx: &mut App) {
+        let Some(store) = FunctionStoreEntity::try_global(cx) else {
+            return;
+        };
+
+        let existing = store
+            .read(cx)
+            .functions()
+            .iter()
+            .find(|f| f.script_path == script_path)
+            .map(|f| f.id);
+
+        store.update(cx, |store, cx| {
+            if let Some(id) = existing {
+                store.update_function(id, |func| func.enabled = enabled, cx);
+            } else if enabled {
+                let name = script_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let func = FunctionConfig::new(name, script_path);
+                store.add_function(func, cx);
+            }
+        });
+    }
+
+    fn delete_function(func_id: Uuid, cx: &mut App) {
         let Some(store) = FunctionStoreEntity::try_global(cx) else {
             return;
         };
 
         store.update(cx, |store, cx| {
-            store.update_function(id, |func| func.enabled = enabled, cx);
+            store.remove_function(func_id, cx);
         });
     }
 }
@@ -67,12 +122,15 @@ impl Render for FunctionBarConfigModal {
         let functions = store.read(cx).functions().to_vec();
         let function_enabled = store.read(cx).function_enabled();
 
+        let scripts_dir = paths::config_dir().join("scripts");
+        let all_scripts = Self::scan_scripts(&scripts_dir);
+
         v_flex()
             .id("function-bar-config-modal")
             .elevation_3(cx)
             .p_3()
             .gap_2()
-            .w(px(400.0))
+            .w(px(420.0))
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
                 this.dismiss(window, cx);
@@ -121,9 +179,15 @@ impl Render for FunctionBarConfigModal {
                     ),
             )
             .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().colors().text_muted)
+                    .child(t("function.available_scripts")),
+            )
+            .child(
                 v_flex()
                     .gap_1()
-                    .when(functions.is_empty(), |this| {
+                    .when(all_scripts.is_empty(), |this| {
                         this.child(
                             div()
                                 .text_sm()
@@ -131,12 +195,13 @@ impl Render for FunctionBarConfigModal {
                                 .child(t("function.empty_hint")),
                         )
                     })
-                    .children(functions.iter().map(|func| {
-                        let func_id = func.id;
-                        let is_enabled = func.enabled;
-                        let name = func.name.clone();
-                        let script_path = func.script_path.display().to_string();
-                        let protocol_label = func.protocol.label();
+                    .children(all_scripts.iter().map(|script| {
+                        let existing_func = functions.iter().find(|f| f.script_path == script.path);
+                        let is_enabled = existing_func.map(|f| f.enabled).unwrap_or(false);
+                        let func_id = existing_func.map(|f| f.id);
+                        let protocol_label = existing_func.map(|f| f.protocol.label());
+                        let script_path = script.path.clone();
+                        let script_name = script.name.clone();
 
                         h_flex()
                             .py_1()
@@ -148,41 +213,57 @@ impl Render for FunctionBarConfigModal {
                                 h_flex()
                                     .gap_2()
                                     .items_center()
+                                    .flex_1()
+                                    .overflow_x_hidden()
                                     .child(
                                         div()
                                             .text_sm()
                                             .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(name),
+                                            .child(script_name.clone()),
                                     )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().colors().text_muted)
-                                            .child(script_path),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .px_1()
-                                            .rounded_sm()
-                                            .bg(cx.theme().colors().element_background)
-                                            .text_color(cx.theme().colors().text_muted)
-                                            .child(protocol_label),
-                                    ),
+                                    .when_some(protocol_label, |this, label| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .px_1()
+                                                .rounded_sm()
+                                                .bg(cx.theme().colors().element_background)
+                                                .text_color(cx.theme().colors().text_muted)
+                                                .child(label),
+                                        )
+                                    }),
                             )
                             .child(
-                                Switch::new(
-                                    SharedString::from(format!("func-switch-{}", func_id)),
-                                    if is_enabled {
-                                        ToggleState::Selected
-                                    } else {
-                                        ToggleState::Unselected
-                                    },
-                                )
-                                .on_click(move |state, _window, cx| {
-                                    let enabled = *state == ToggleState::Selected;
-                                    Self::toggle_function(func_id, enabled, cx);
-                                }),
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .when_some(func_id, |this, id| {
+                                        this.child(
+                                            IconButton::new(
+                                                SharedString::from(format!("delete-func-{}", id)),
+                                                IconName::Trash,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .tooltip(Tooltip::text(t("common.delete")))
+                                            .on_click(move |_, _window, cx| {
+                                                Self::delete_function(id, cx);
+                                            }),
+                                        )
+                                    })
+                                    .child(
+                                        Switch::new(
+                                            SharedString::from(format!("script-switch-{}", script_name)),
+                                            if is_enabled {
+                                                ToggleState::Selected
+                                            } else {
+                                                ToggleState::Unselected
+                                            },
+                                        )
+                                        .on_click(move |state, _window, cx| {
+                                            let enabled = *state == ToggleState::Selected;
+                                            Self::toggle_script(script_path.clone(), enabled, cx);
+                                        }),
+                                    ),
                             )
                     })),
             )
