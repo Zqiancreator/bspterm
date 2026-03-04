@@ -206,13 +206,21 @@ impl RenderOnce for Tab {
                 h_flex()
                     .group("")
                     .relative()
+                    .overflow_x_hidden()
                     .h(Tab::content_height(cx))
                     .children(self.led_slot)
                     .px(DynamicSpacing::Base04.px(cx))
                     .gap(DynamicSpacing::Base04.rems(cx))
                     .text_color(text_color)
                     .child(start_slot)
-                    .children(self.children)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_x_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .children(self.children),
+                    )
                     .child(end_slot),
             )
     }

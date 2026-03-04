@@ -18,6 +18,7 @@ pub use row_decorator::*;
 use button_bar::script_runner::ScriptStatus;
 
 use assistant_slash_command::SlashCommandRegistry;
+use chrono::Datelike;
 use editor::{Editor, EditorSettings, actions::SelectAll, blink_manager::BlinkManager};
 use gpui::{
     Action, AnyElement, App, ClipboardEntry, DismissEvent, DragMoveEvent, Entity, EventEmitter,
@@ -2683,8 +2684,25 @@ print(output)
     ) {
         let content = self.terminal.read(cx).get_content();
         let terminal_title = self.terminal.read(cx).title(false);
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        let buffer_title = format!("Terminal Export - {} - {}", terminal_title, timestamp);
+        let now = chrono::Local::now();
+        let weekday_cn = match now.weekday() {
+            chrono::Weekday::Mon => "星期一",
+            chrono::Weekday::Tue => "星期二",
+            chrono::Weekday::Wed => "星期三",
+            chrono::Weekday::Thu => "星期四",
+            chrono::Weekday::Fri => "星期五",
+            chrono::Weekday::Sat => "星期六",
+            chrono::Weekday::Sun => "星期日",
+        };
+        let timestamp = now.format("%Y-%m-%d %H.%M.%S");
+        let max_title_len = 20;
+        let short_title = if terminal_title.chars().count() > max_title_len {
+            let truncated: String = terminal_title.chars().take(max_title_len).collect();
+            format!("{}…", truncated)
+        } else {
+            terminal_title
+        };
+        let buffer_title = format!("{}_{}_{}", timestamp, weekday_cn, short_title);
         let group_key = self.group_key(cx);
 
         let workspace = self.workspace.clone();
