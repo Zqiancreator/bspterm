@@ -626,18 +626,18 @@ impl TerminalView {
     pub fn schedule_number_hover(
         &mut self,
         position: Point<Pixels>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         const NUMBER_HOVER_DELAY_MS: u64 = 300;
 
         let terminal = self.terminal.clone();
-        self.number_hover_task = Some(cx.spawn_in(window, async move |_this, cx| {
+        self.number_hover_task = Some(cx.spawn(async move |_this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(NUMBER_HOVER_DELAY_MS))
                 .await;
 
-            let _ = terminal.update(&mut cx.clone(), |terminal, cx| {
+            terminal.update(cx, |terminal, cx| {
                 terminal.schedule_find_number(position);
                 cx.notify();
             });
