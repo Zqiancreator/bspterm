@@ -392,6 +392,13 @@ function:
   script_path_label: "脚本路径"
   script_path_placeholder: "脚本路径 (如: ~/.config/bspterm/scripts/disp_boa.py)"
   applicable_protocol: "适用协议"
+  new_python_script: "新建 Python 脚本"
+  select_existing_script: "选择现有脚本"
+  create_and_edit: "创建并编辑"
+  script_name: "脚本名称"
+  no_scripts_available: "暂无可用脚本"
+  select_script: "选择脚本"
+  new_function_script: "新建函数脚本"
 
 # Button Bar
 button_bar:

@@ -33,8 +33,8 @@ try {
         version = 1
         buttons = @(
             @{
-                label = "ne5000e_mpu_collector"
-                script_path = "ne5000e_mpu_collector.py"
+                label = "scan_mpu_ip"
+                script_path = "scan_mpu_ip.py"
                 tooltip = "Collect MPU IP addresses from NE5000E router"
                 enabled = $true
             }
@@ -55,7 +55,7 @@ try {
     # Copy scripts
     $scriptsDir = Join-Path $tempDir "scripts"
     New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
-    Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\ne5000e_mpu_collector.py") -Destination $scriptsDir
+    Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\scan_mpu_ip.py") -Destination $scriptsDir
     Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\device_online_notify.py") -Destination $scriptsDir
     Copy-Item -Path (Join-Path $workspaceRoot "assets\scripts\disp_boa.py") -Destination $scriptsDir
 

@@ -392,6 +392,13 @@ function:
   script_path_label: "Script Path"
   script_path_placeholder: "Script path (e.g., ~/.config/bspterm/scripts/disp_boa.py)"
   applicable_protocol: "Applicable Protocol"
+  new_python_script: "Create New Python Script"
+  select_existing_script: "Select Existing Script"
+  create_and_edit: "Create and Edit"
+  script_name: "Script Name"
+  no_scripts_available: "No scripts available"
+  select_script: "Select Script"
+  new_function_script: "New Function Script"
 
 # Button Bar
 button_bar:

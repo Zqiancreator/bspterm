@@ -2427,6 +2427,13 @@ impl Terminal {
             let is_enter = input_bytes.iter().any(|&b| b == b'\r' || b == b'\n');
 
             // For Enter, check function invocation FIRST (higher priority than abbreviation)
+            if is_enter {
+                log::info!(
+                    "[function] Enter pressed, function_enabled={}, line_buffer={:?}",
+                    function_enabled,
+                    self.current_line_buffer
+                );
+            }
             if function_enabled && is_enter {
                 if let Some(invocation) = self.try_invoke_function(cx) {
                     // Clear the input line by sending backspaces
@@ -2651,11 +2658,13 @@ impl Terminal {
         // Get the current line without leading/trailing whitespace
         let line = self.current_line_buffer.trim();
         if line.is_empty() {
+            log::info!("[function] try_invoke_function: line buffer is empty");
             return None;
         }
 
         // Check if we're at a command position (line start, not after pipes etc.)
         if !self.is_at_function_position() {
+            log::info!("[function] try_invoke_function: not at function position, line={:?}", line);
             return None;
         }
 
@@ -2665,10 +2674,14 @@ impl Terminal {
         let raw_args = parts.next().unwrap_or("").trim().to_string();
 
         // Get the function store
-        let store = FunctionStoreEntity::try_global(cx)?;
-        let store = store.read(cx);
+        let Some(store_entity) = FunctionStoreEntity::try_global(cx) else {
+            log::info!("[function] try_invoke_function: FunctionStoreEntity not available");
+            return None;
+        };
+        let store = store_entity.read(cx);
 
         if !store.function_enabled() {
+            log::info!("[function] try_invoke_function: function_enabled=false in store");
             return None;
         }
 
@@ -2676,10 +2689,26 @@ impl Terminal {
         let protocol = self.get_current_function_protocol();
 
         // Find matching function
-        let func = store.find_by_name(func_name, protocol.as_ref())?;
+        let func = store.find_by_name(func_name, protocol.as_ref());
+        if func.is_none() {
+            log::info!(
+                "[function] try_invoke_function: no matching function for name={:?}, protocol={:?}",
+                func_name,
+                protocol
+            );
+            return None;
+        }
+        let func = func?;
 
         // Parse arguments (simple space-separated, respecting quotes)
         let arguments = Self::parse_function_arguments(&raw_args);
+
+        log::info!(
+            "[function] try_invoke_function: matched function={:?}, script={:?}, args={:?}",
+            func.name,
+            func.script_path,
+            arguments
+        );
 
         Some(FunctionInvocation {
             function_id: func.id,

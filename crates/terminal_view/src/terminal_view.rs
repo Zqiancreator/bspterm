@@ -1509,7 +1509,6 @@ print(output)
 
     /// Execute a function invoked from the terminal command line.
     fn execute_function(&mut self, invocation: FunctionInvocation, cx: &mut Context<Self>) {
-        use script_panel::script_runner::ScriptRunner;
         use std::collections::HashMap;
 
         // Get connection info from terminal for socket connection
@@ -1536,7 +1535,23 @@ print(output)
             params.insert(format!("BSPTERM_PARAM_ARG{}", i), arg.clone());
         }
 
-        let mut runner = ScriptRunner::new_with_params(
+        // Map positional args to named @params declarations
+        if let Ok(content) = std::fs::read_to_string(&script_path) {
+            if let Some(script_params) =
+                script_panel::script_params::ScriptParams::parse_from_script(&content)
+            {
+                let mut values: HashMap<String, String> = HashMap::new();
+                for (i, param) in script_params.params.iter().enumerate() {
+                    if let Some(arg) = invocation.arguments.get(i) {
+                        values.insert(param.name.clone(), arg.clone());
+                    }
+                }
+                let named_params = script_params.to_env_map(&values);
+                params.extend(named_params);
+            }
+        }
+
+        let mut runner = ButtonBarScriptRunner::new_with_params(
             PathBuf::from(&script_path),
             connection_info.to_env_string(),
             terminal_id,
@@ -1549,10 +1564,6 @@ print(output)
             return;
         }
 
-        // Create a wrapper runner to track the script execution
-        // Note: ButtonBarScriptRunner wraps ScriptRunner, but since we've already
-        // started our parameterized runner, we just log completion. The script
-        // communicates via socket to control the terminal.
         log::info!(
             "Function '{}' started with {} args: {:?}",
             invocation.function_name,
@@ -1560,9 +1571,7 @@ print(output)
             invocation.arguments
         );
 
-        // For now, we don't track function runners separately since the script
-        // runs independently and communicates via socket. The runner will be
-        // dropped when it goes out of scope, but the Python process continues.
+        self.function_runner = Some(runner);
         cx.notify();
     }
 
@@ -1590,6 +1599,38 @@ print(output)
                 log::error!("Button bar script failed: {}", err);
                 let err_msg = err.clone();
                 self.button_bar_runner = None;
+                Some(err_msg)
+            }
+            _ => None,
+        };
+
+        if let Some(err) = error_message {
+            self.show_script_error(&err, cx);
+        }
+    }
+
+    fn update_function_runner(&mut self, cx: &mut Context<Self>) {
+        let Some(runner) = &mut self.function_runner else {
+            return;
+        };
+
+        if let Some(output) = runner.read_output() {
+            for line in output.lines() {
+                log::info!("[function-script] {}", line);
+            }
+        }
+
+        let status = runner.status();
+        let error_message = match &status {
+            ScriptStatus::Finished(code) => {
+                log::info!("[function-script] finished with code {}", code);
+                self.function_runner = None;
+                None
+            }
+            ScriptStatus::Failed(err) => {
+                log::error!("[function-script] failed: {}", err);
+                let err_msg = err.clone();
+                self.function_runner = None;
                 Some(err_msg)
             }
             _ => None,
@@ -2168,10 +2209,11 @@ print(output)
     fn add_function(&mut self, _: &AddFunction, window: &mut Window, cx: &mut Context<Self>) {
         let protocol = self.terminal.read(cx).get_current_function_protocol();
         let default_protocol = protocol.unwrap_or(FunctionProtocol::All);
+        let workspace = self.workspace.clone();
         self.workspace
             .update(cx, |ws, cx| {
                 ws.toggle_modal(window, cx, |window, cx| {
-                    AddFunctionModal::new(default_protocol, window, cx)
+                    AddFunctionModal::new(workspace, default_protocol, window, cx)
                 });
             })
             .ok();
@@ -3853,6 +3895,7 @@ impl Render for TerminalView {
 
         // Update button bar runner status and log output
         self.update_button_bar_runner(cx);
+        self.update_function_runner(cx);
 
         let terminal_handle = self.terminal.clone();
         let terminal_view_handle = cx.entity();

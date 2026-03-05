@@ -1,17 +1,22 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use editor::Editor;
 use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, Styled, Subscription, Window,
+    ParentElement, Render, Styled, Subscription, WeakEntity, Window,
 };
-use ui::Tooltip;
 use i18n::t;
-use std::path::{Path, PathBuf};
 use terminal::{
     FunctionConfig, FunctionProtocol, FunctionStoreEntity, FunctionStoreEvent,
 };
+use ui::Tooltip;
+use ui::{
+    Color, FluentBuilder, IconButton, IconName, IconSize, Label, ListItem, ListItemSpacing,
+    Switch, TintColor, ToggleState, prelude::*,
+};
 use uuid::Uuid;
-use ui::{FluentBuilder, IconButton, IconName, IconSize, Label, Switch, TintColor, ToggleState, prelude::*};
-use workspace::ModalView;
+use workspace::{ModalView, OpenOptions, Workspace};
 
 /// Information about a script file.
 struct ScriptInfo {
@@ -270,6 +275,27 @@ impl Render for FunctionBarConfigModal {
     }
 }
 
+fn scripts_dir() -> PathBuf {
+    paths::config_dir().join("scripts")
+}
+
+fn scan_available_scripts() -> Vec<PathBuf> {
+    let dir = scripts_dir();
+    let mut scripts = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "py") {
+                if path.file_name().is_some_and(|name| name != "bspterm.py") {
+                    scripts.push(path);
+                }
+            }
+        }
+    }
+    scripts.sort();
+    scripts
+}
+
 fn protocol_button(
     id: &str,
     protocol: FunctionProtocol,
@@ -291,6 +317,465 @@ fn protocol_button(
         }))
 }
 
+/// Mode for the add function modal.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum AddFunctionMode {
+    #[default]
+    SelectType,
+    NewScript,
+    SelectExisting,
+}
+
+/// Modal dialog for adding a new function.
+pub struct AddFunctionModal {
+    focus_handle: FocusHandle,
+    workspace: WeakEntity<Workspace>,
+    mode: AddFunctionMode,
+    name_editor: Entity<Editor>,
+    protocol: FunctionProtocol,
+    selected_script: Option<PathBuf>,
+    available_scripts: Vec<PathBuf>,
+}
+
+impl ModalView for AddFunctionModal {}
+
+impl EventEmitter<DismissEvent> for AddFunctionModal {}
+
+impl Focusable for AddFunctionModal {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl AddFunctionModal {
+    pub fn new(
+        workspace: WeakEntity<Workspace>,
+        default_protocol: FunctionProtocol,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
+
+        let name_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("function.script_name"), window, cx);
+            editor
+        });
+
+        let available_scripts = scan_available_scripts();
+
+        Self {
+            focus_handle,
+            workspace,
+            mode: AddFunctionMode::SelectType,
+            name_editor,
+            protocol: default_protocol,
+            selected_script: None,
+            available_scripts,
+        }
+    }
+
+    fn dismiss(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn set_protocol(&mut self, protocol: FunctionProtocol, cx: &mut Context<Self>) {
+        self.protocol = protocol;
+        cx.notify();
+    }
+
+    fn set_mode(&mut self, mode: AddFunctionMode, window: &mut Window, cx: &mut Context<Self>) {
+        self.mode = mode;
+        self.selected_script = None;
+
+        self.name_editor.update(cx, |editor, cx| {
+            editor.set_text(String::new(), window, cx);
+        });
+
+        cx.notify();
+    }
+
+    fn select_script(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(file_name) = path.file_stem() {
+            let label = file_name.to_string_lossy().to_string();
+            self.name_editor.update(cx, |editor, cx| {
+                editor.set_text(label, window, cx);
+            });
+        }
+        self.selected_script = Some(path);
+        cx.notify();
+    }
+
+    fn create_new_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let label = self.name_editor.read(cx).text(cx).trim().to_string();
+
+        if label.is_empty() {
+            return;
+        }
+
+        let scripts_directory = scripts_dir();
+        if let Err(error) = fs::create_dir_all(&scripts_directory) {
+            log::error!("Failed to create scripts directory: {}", error);
+            return;
+        }
+
+        let script_path = scripts_directory.join(format!("{}.py", label));
+
+        let template = format!(
+            r#"#!/usr/bin/env python3
+"""
+{label} - Terminal function script
+
+@params
+- target: string
+  description: 目标设备地址
+  required: true
+  default: "192.168.1.1"
+
+- count: number
+  description: 执行次数
+  default: 1
+@end_params
+"""
+from bspterm import current_terminal, params
+
+def main():
+    term = current_terminal()
+    target = params.target
+    count = int(params.count)
+    # Add your automation logic here
+    # term.send("command\n")
+    # term.wait_for("pattern")
+    # output = term.run("command")
+
+if __name__ == "__main__":
+    main()
+"#
+        );
+
+        if let Err(error) = fs::write(&script_path, &template) {
+            log::error!("Failed to write script file: {}", error);
+            return;
+        }
+
+        let protocol = self.protocol.clone();
+        if let Some(store) = FunctionStoreEntity::try_global(cx) {
+            let function =
+                FunctionConfig::with_protocol(label, script_path.clone(), protocol);
+            store.update(cx, |store, cx| {
+                store.add_function(function, cx);
+            });
+        }
+
+        self.dismiss(window, cx);
+
+        let workspace = self.workspace.clone();
+        let script_path = script_path.clone();
+        cx.defer_in(window, move |_, window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace
+                        .open_abs_path(script_path, OpenOptions::default(), window, cx)
+                        .detach_and_log_err(cx);
+                })
+                .ok();
+        });
+    }
+
+    fn add_existing_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(script_path) = self.selected_script.clone() else {
+            return;
+        };
+
+        let label = self.name_editor.read(cx).text(cx).trim().to_string();
+        if label.is_empty() {
+            return;
+        }
+
+        let protocol = self.protocol.clone();
+        if let Some(store) = FunctionStoreEntity::try_global(cx) {
+            let function = FunctionConfig::with_protocol(label, script_path, protocol);
+            store.update(cx, |store, cx| {
+                store.add_function(function, cx);
+            });
+        }
+
+        self.dismiss(window, cx);
+    }
+
+    fn render_select_type(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .gap_2()
+            .child(
+                ListItem::new("new-script-option")
+                    .spacing(ListItemSpacing::Sparse)
+                    .start_slot(
+                        ui::Icon::new(IconName::FileCode)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(t("function.new_python_script"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.set_mode(AddFunctionMode::NewScript, window, cx);
+                    })),
+            )
+            .child(
+                ListItem::new("existing-script-option")
+                    .spacing(ListItemSpacing::Sparse)
+                    .start_slot(
+                        ui::Icon::new(IconName::Folder)
+                            .size(IconSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(t("function.select_existing_script"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.set_mode(AddFunctionMode::SelectExisting, window, cx);
+                    })),
+            )
+    }
+
+    fn render_new_script(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .gap_3()
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(t("function.script_name")),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(self.name_editor.clone()),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(t("function.applicable_protocol")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(protocol_button(
+                                "protocol-all",
+                                FunctionProtocol::All,
+                                &self.protocol,
+                                cx,
+                            ))
+                            .child(protocol_button(
+                                "protocol-ssh",
+                                FunctionProtocol::Ssh,
+                                &self.protocol,
+                                cx,
+                            ))
+                            .child(protocol_button(
+                                "protocol-telnet",
+                                FunctionProtocol::Telnet,
+                                &self.protocol,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        ui::Button::new("cancel-btn", t("common.cancel"))
+                            .style(ui::ButtonStyle::Subtle)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_mode(AddFunctionMode::SelectType, window, cx);
+                            })),
+                    )
+                    .child(
+                        ui::Button::new("create-btn", t("function.create_and_edit"))
+                            .style(ui::ButtonStyle::Filled)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.create_new_script(window, cx);
+                            })),
+                    ),
+            )
+    }
+
+    fn render_select_existing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let scripts = self.available_scripts.clone();
+        let selected = self.selected_script.clone();
+
+        v_flex()
+            .gap_3()
+            .child(
+                v_flex()
+                    .id("script-list")
+                    .gap_1()
+                    .max_h(px(150.0))
+                    .overflow_y_scroll()
+                    .when(scripts.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().colors().text_muted)
+                                .child(t("function.no_scripts_available")),
+                        )
+                    })
+                    .children(scripts.iter().map(|path| {
+                        let path_clone = path.clone();
+                        let is_selected = selected.as_ref() == Some(path);
+                        let file_name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+
+                        ListItem::new(SharedString::from(format!("script-{}", file_name)))
+                            .spacing(ListItemSpacing::Sparse)
+                            .start_slot(
+                                ui::Icon::new(IconName::FileCode)
+                                    .size(IconSize::Small)
+                                    .color(if is_selected {
+                                        Color::Accent
+                                    } else {
+                                        Color::Muted
+                                    }),
+                            )
+                            .child(file_name)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_script(path_clone.clone(), window, cx);
+                            }))
+                    })),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(t("function.script_name")),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .child(self.name_editor.clone()),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(t("function.applicable_protocol")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(protocol_button(
+                                "protocol-all-ex",
+                                FunctionProtocol::All,
+                                &self.protocol,
+                                cx,
+                            ))
+                            .child(protocol_button(
+                                "protocol-ssh-ex",
+                                FunctionProtocol::Ssh,
+                                &self.protocol,
+                                cx,
+                            ))
+                            .child(protocol_button(
+                                "protocol-telnet-ex",
+                                FunctionProtocol::Telnet,
+                                &self.protocol,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        ui::Button::new("cancel-btn", t("common.cancel"))
+                            .style(ui::ButtonStyle::Subtle)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_mode(AddFunctionMode::SelectType, window, cx);
+                            })),
+                    )
+                    .child(
+                        ui::Button::new("add-btn", t("common.add"))
+                            .style(ui::ButtonStyle::Filled)
+                            .disabled(self.selected_script.is_none())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.add_existing_script(window, cx);
+                            })),
+                    ),
+            )
+    }
+}
+
+impl Render for AddFunctionModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = match self.mode {
+            AddFunctionMode::SelectType => t("function.add_title"),
+            AddFunctionMode::NewScript => t("function.new_function_script"),
+            AddFunctionMode::SelectExisting => t("function.select_script"),
+        };
+
+        v_flex()
+            .id("add-function-modal")
+            .elevation_3(cx)
+            .p_3()
+            .gap_3()
+            .w(px(400.0))
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
+                this.dismiss(window, cx);
+            }))
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        IconButton::new("close-modal", IconName::Close)
+                            .icon_size(IconSize::Small)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss(window, cx);
+                            })),
+                    ),
+            )
+            .child(match self.mode {
+                AddFunctionMode::SelectType => self.render_select_type(cx).into_any_element(),
+                AddFunctionMode::NewScript => self.render_new_script(cx).into_any_element(),
+                AddFunctionMode::SelectExisting => {
+                    self.render_select_existing(cx).into_any_element()
+                }
+            })
+    }
+}
+
 fn edit_protocol_button(
     id: &str,
     protocol: FunctionProtocol,
@@ -310,166 +795,6 @@ fn edit_protocol_button(
         .on_click(cx.listener(move |this, _, _window, cx| {
             this.set_protocol(protocol_clone.clone(), cx);
         }))
-}
-
-/// Modal dialog for adding a new function.
-pub struct AddFunctionModal {
-    focus_handle: FocusHandle,
-    name_editor: Entity<Editor>,
-    script_path_editor: Entity<Editor>,
-    protocol: FunctionProtocol,
-}
-
-impl ModalView for AddFunctionModal {}
-
-impl EventEmitter<DismissEvent> for AddFunctionModal {}
-
-impl Focusable for AddFunctionModal {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl AddFunctionModal {
-    pub fn new(
-        default_protocol: FunctionProtocol,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let focus_handle = cx.focus_handle();
-        focus_handle.focus(window, cx);
-
-        let name_editor = cx.new(|cx| {
-            let mut ed = Editor::single_line(window, cx);
-            ed.set_placeholder_text(&t("function.name_placeholder"), window, cx);
-            ed
-        });
-
-        let script_path_editor = cx.new(|cx| {
-            let mut ed = Editor::single_line(window, cx);
-            ed.set_placeholder_text(&t("function.script_path_placeholder"), window, cx);
-            ed
-        });
-
-        Self {
-            focus_handle,
-            name_editor,
-            script_path_editor,
-            protocol: default_protocol,
-        }
-    }
-
-    fn set_protocol(&mut self, protocol: FunctionProtocol, cx: &mut Context<Self>) {
-        self.protocol = protocol;
-        cx.notify();
-    }
-
-    fn confirm(&mut self, _: &menu::Confirm, _window: &mut Window, cx: &mut Context<Self>) {
-        let name = self.name_editor.read(cx).text(cx);
-        let script_path_str = self.script_path_editor.read(cx).text(cx);
-
-        if name.is_empty() || script_path_str.is_empty() {
-            return;
-        }
-
-        let script_path = PathBuf::from(script_path_str);
-
-        if let Some(store) = FunctionStoreEntity::try_global(cx) {
-            let func = FunctionConfig::with_protocol(name, script_path, self.protocol.clone());
-            store.update(cx, |store, cx| {
-                store.add_function(func, cx);
-            });
-        }
-
-        cx.emit(DismissEvent);
-    }
-
-    fn dismiss(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(DismissEvent);
-    }
-}
-
-impl Render for AddFunctionModal {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let current_protocol = self.protocol.clone();
-
-        v_flex()
-            .key_context("AddFunctionModal")
-            .elevation_3(cx)
-            .p_4()
-            .gap_3()
-            .w(px(400.0))
-            .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(Self::dismiss))
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(t("function.add_title")),
-            )
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new(t("function.name_label")).size(LabelSize::Small))
-                            .child(self.name_editor.clone()),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new(t("function.script_path_label")).size(LabelSize::Small))
-                            .child(self.script_path_editor.clone()),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new(t("function.applicable_protocol")).size(LabelSize::Small))
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(protocol_button(
-                                        "add-all",
-                                        FunctionProtocol::All,
-                                        &current_protocol,
-                                        cx,
-                                    ))
-                                    .child(protocol_button(
-                                        "add-ssh",
-                                        FunctionProtocol::Ssh,
-                                        &current_protocol,
-                                        cx,
-                                    ))
-                                    .child(protocol_button(
-                                        "add-telnet",
-                                        FunctionProtocol::Telnet,
-                                        &current_protocol,
-                                        cx,
-                                    )),
-                            ),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        ui::Button::new("cancel", t("common.cancel"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.dismiss(&menu::Cancel, window, cx)
-                            })),
-                    )
-                    .child(
-                        ui::Button::new("confirm", t("common.confirm"))
-                            .style(ui::ButtonStyle::Filled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.confirm(&menu::Confirm, window, cx)
-                            })),
-                    ),
-            )
-    }
 }
 
 /// Modal dialog for editing an existing function.

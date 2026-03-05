@@ -77,7 +77,7 @@ jobs:
           cp assets/settings/default_highlight_rules.json config-pkg/settings/
           cp assets/scripts/bspterm.py config-pkg/scripts/
           cp assets/scripts/device_online_notify.py config-pkg/scripts/
-          cp assets/scripts/ne5000e_mpu_collector.py config-pkg/scripts/
+          cp assets/scripts/scan_mpu_ip.py config-pkg/scripts/
           cp assets/scripts/API.md config-pkg/scripts/
           cd config-pkg && zip -r ../bspterm-config.zip . && cd ..
           mkdir -p release-artifacts

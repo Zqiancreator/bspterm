@@ -7,6 +7,7 @@ use i18n::t;
 use language::Buffer;
 use project::Project;
 use std::path::Path;
+use std::collections::HashMap;
 use std::{fs, path::PathBuf};
 use terminal::{ButtonBarStoreEntity, ButtonBarStoreEvent, ButtonConfig};
 use uuid::Uuid;
@@ -29,6 +30,17 @@ impl ButtonBarScriptRunner {
     pub fn new(script_path: PathBuf, connection_string: String, terminal_id: Option<String>) -> Self {
         Self {
             runner: ScriptRunner::new(script_path, connection_string, terminal_id),
+        }
+    }
+
+    pub fn new_with_params(
+        script_path: PathBuf,
+        connection_string: String,
+        terminal_id: Option<String>,
+        params: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            runner: ScriptRunner::new_with_params(script_path, connection_string, terminal_id, params),
         }
     }
 

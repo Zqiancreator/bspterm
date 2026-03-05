@@ -28,7 +28,7 @@
 - `scripts/bspterm.py` - Python 脚本客户端库
 - `scripts/API.md` - Python 脚本 API 文档
 - `scripts/device_online_notify.py` - 示例：设备上线通知脚本
-- `scripts/ne5000e_mpu_collector.py` - 示例：NE5000E MPU 数据采集脚本
+- `scripts/scan_mpu_ip.py` - 示例：NE5000E MPU 数据采集脚本
 
 配置文件放置位置：`~/.config/bspterm/`
 
