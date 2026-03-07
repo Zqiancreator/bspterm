@@ -1348,8 +1348,11 @@ impl TerminalPanel {
             }
         }
 
-        // Append any new groups not yet in order (preserving encounter order from pane items)
-        for group in groups.into_values() {
+        // Append any new groups not yet in order, sorted by first tab index
+        // so that newly added groups appear at the bottom
+        let mut remaining: Vec<_> = groups.into_values().collect();
+        remaining.sort_by_key(|g| g.tab_indices.first().copied().unwrap_or(usize::MAX));
+        for group in remaining {
             if group.key == GroupKey::Other {
                 other_group = Some(group);
             } else {
