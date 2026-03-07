@@ -401,6 +401,8 @@ pub struct Pane {
         ) -> (Option<AnyElement>, Option<AnyElement>),
     >,
     render_tab_bar: Rc<dyn Fn(&mut Pane, &mut Window, &mut Context<Pane>) -> AnyElement>,
+    tab_nav_group_provider:
+        Option<Rc<dyn Fn(usize, &[Box<dyn ItemHandle>], &App) -> Option<Vec<usize>>>>,
     show_tab_bar_buttons: bool,
     max_tabs: Option<NonZeroUsize>,
     use_max_tabs: bool,
@@ -579,6 +581,7 @@ impl Pane {
             should_display_welcome_page: false,
             render_tab_bar_buttons: Rc::new(default_render_tab_bar_buttons),
             render_tab_bar: Rc::new(Self::render_tab_bar),
+            tab_nav_group_provider: None,
             show_tab_bar_buttons: TabBarSettings::get_global(cx).show_tab_bar_buttons,
             display_nav_history_buttons: Some(
                 TabBarSettings::get_global(cx).show_nav_history_buttons,
@@ -834,6 +837,20 @@ impl Pane {
     {
         self.render_tab_bar = Rc::new(render);
         cx.notify();
+    }
+
+    pub fn set_tab_nav_group_provider(
+        &mut self,
+        provider: Option<
+            Rc<dyn Fn(usize, &[Box<dyn ItemHandle>], &App) -> Option<Vec<usize>>>,
+        >,
+    ) {
+        self.tab_nav_group_provider = provider;
+    }
+
+    fn current_nav_group(&self, cx: &App) -> Option<Vec<usize>> {
+        let provider = self.tab_nav_group_provider.as_ref()?;
+        provider(self.active_item_index, &self.items, cx)
     }
 
     pub fn set_render_tab_bar_buttons<F>(&mut self, cx: &mut Context<Self>, render: F)
@@ -1494,12 +1511,17 @@ impl Pane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut index = self.active_item_index;
-        if index > 0 {
-            index -= 1;
-        } else if !self.items.is_empty() {
-            index = self.items.len() - 1;
-        }
+        let index = if let Some(group) = self.current_nav_group(cx) {
+            navigate_within_group(self.active_item_index, &group, false)
+        } else {
+            let mut index = self.active_item_index;
+            if index > 0 {
+                index -= 1;
+            } else if !self.items.is_empty() {
+                index = self.items.len() - 1;
+            }
+            index
+        };
         self.activate_item(index, true, true, window, cx);
     }
 
@@ -1509,12 +1531,17 @@ impl Pane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut index = self.active_item_index;
-        if index + 1 < self.items.len() {
-            index += 1;
+        let index = if let Some(group) = self.current_nav_group(cx) {
+            navigate_within_group(self.active_item_index, &group, true)
         } else {
-            index = 0;
-        }
+            let mut index = self.active_item_index;
+            if index + 1 < self.items.len() {
+                index += 1;
+            } else {
+                index = 0;
+            }
+            index
+        };
         self.activate_item(index, true, true, window, cx);
     }
 
@@ -4164,6 +4191,17 @@ impl Pane {
 
     pub fn set_zoom_out_on_close(&mut self, zoom_out_on_close: bool) {
         self.zoom_out_on_close = zoom_out_on_close;
+    }
+}
+
+fn navigate_within_group(current: usize, group: &[usize], forward: bool) -> usize {
+    let Some(position) = group.iter().position(|&i| i == current) else {
+        return group.first().copied().unwrap_or(current);
+    };
+    if forward {
+        group[(position + 1) % group.len()]
+    } else {
+        group[(position + group.len() - 1) % group.len()]
     }
 }
 

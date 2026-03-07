@@ -1,4 +1,4 @@
-use std::{cmp, ops::ControlFlow, path::PathBuf, process::ExitStatus, sync::Arc, time::Duration};
+use std::{cmp, ops::ControlFlow, path::PathBuf, process::ExitStatus, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
     TerminalView, default_working_directory,
@@ -285,12 +285,19 @@ impl TerminalPanel {
 
             // Set up the grouped tab bar if enabled
             if group_tabs {
-                let weak_panel = weak_panel.clone();
+                let weak_panel_render = weak_panel.clone();
                 pane.set_render_tab_bar(cx, move |pane, window, cx| {
-                    render_grouped_tab_bar(&weak_panel, pane, window, cx)
+                    render_grouped_tab_bar(&weak_panel_render, pane, window, cx)
                 });
+                let weak_panel_nav = weak_panel.clone();
+                pane.set_tab_nav_group_provider(Some(Rc::new(
+                    move |active_index, items, cx| {
+                        nav_group_for_active_item(&weak_panel_nav, active_index, items, cx)
+                    },
+                )));
             } else {
                 pane.set_render_tab_bar(cx, Pane::render_tab_bar);
+                pane.set_tab_nav_group_provider(None);
             }
         });
     }
@@ -303,12 +310,19 @@ impl TerminalPanel {
         for pane in center_panes {
             pane.update(cx, |pane, cx| {
                 if group_tabs {
-                    let weak_panel = weak_panel.clone();
+                    let weak_panel_render = weak_panel.clone();
                     pane.set_render_tab_bar(cx, move |pane, window, cx| {
-                        render_grouped_tab_bar(&weak_panel, pane, window, cx)
+                        render_grouped_tab_bar(&weak_panel_render, pane, window, cx)
                     });
+                    let weak_panel_nav = weak_panel.clone();
+                    pane.set_tab_nav_group_provider(Some(Rc::new(
+                        move |active_index, items, cx| {
+                            nav_group_for_active_item(&weak_panel_nav, active_index, items, cx)
+                        },
+                    )));
                 } else {
                     pane.set_render_tab_bar(cx, Pane::render_tab_bar);
+                    pane.set_tab_nav_group_provider(None);
                 }
             });
         }
@@ -1429,6 +1443,54 @@ impl TerminalPanel {
         // Remove from group_order
         self.group_order.retain(|k| k != key);
         cx.notify();
+    }
+}
+
+/// Returns the tab indices belonging to the same group as the active item.
+/// Used by Pane's tab_nav_group_provider to constrain next/previous navigation.
+fn nav_group_for_active_item(
+    weak_panel: &WeakEntity<TerminalPanel>,
+    active_index: usize,
+    items: &[Box<dyn workspace::item::ItemHandle>],
+    cx: &App,
+) -> Option<Vec<usize>> {
+    let panel = weak_panel.upgrade()?;
+    let panel = panel.read(cx);
+
+    // Determine the group key for the active item
+    let active_item = items.get(active_index)?;
+    let active_key = item_to_group_key(active_item, panel, cx);
+
+    // Collect all indices belonging to the same group
+    let group_indices: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item_to_group_key(item, panel, cx) == active_key)
+        .map(|(index, _)| index)
+        .collect();
+
+    if group_indices.len() <= 1 {
+        return None;
+    }
+
+    Some(group_indices)
+}
+
+fn item_to_group_key(
+    item: &Box<dyn workspace::item::ItemHandle>,
+    panel: &TerminalPanel,
+    cx: &App,
+) -> GroupKey {
+    if let Some(terminal_view) = item.downcast::<TerminalView>() {
+        let terminal_view = terminal_view.read(cx);
+        panel.terminal_to_group_key(terminal_view, cx)
+    } else {
+        let item_id = item.item_id();
+        panel
+            .group_overrides
+            .get(&item_id)
+            .cloned()
+            .unwrap_or(GroupKey::Other)
     }
 }
 
