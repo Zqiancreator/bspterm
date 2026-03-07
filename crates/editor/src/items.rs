@@ -17,6 +17,7 @@ use gpui::{
     AnyElement, App, AsyncWindowContext, Context, Entity, EntityId, EventEmitter, IntoElement,
     ParentElement, Pixels, SharedString, Styled, Task, WeakEntity, Window, point,
 };
+use std::rc::Rc;
 use language::{
     Bias, Buffer, BufferRow, CharKind, CharScopeContext, LocalFile, Point, SelectionGoal,
     proto::serialize_anchor as serialize_text_anchor,
@@ -1044,7 +1045,7 @@ impl Item for Editor {
         &self,
         _window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Vec<(SharedString, Box<dyn gpui::Action>)> {
+    ) -> Vec<(SharedString, Option<Box<dyn gpui::Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> {
         let mut actions = Vec::new();
 
         let is_markdown = self
@@ -1068,14 +1069,20 @@ impl Item for Editor {
         if is_markdown {
             actions.push((
                 "Open Markdown Preview".into(),
-                Box::new(OpenMarkdownPreview) as Box<dyn gpui::Action>,
+                Some(Box::new(OpenMarkdownPreview) as Box<dyn gpui::Action>),
+                Rc::new(|window: &mut Window, cx: &mut App| {
+                    window.dispatch_action(Box::new(OpenMarkdownPreview), cx);
+                }) as Rc<dyn Fn(&mut Window, &mut App)>,
             ));
         }
 
         if is_svg {
             actions.push((
                 "Open SVG Preview".into(),
-                Box::new(OpenSvgPreview) as Box<dyn gpui::Action>,
+                Some(Box::new(OpenSvgPreview) as Box<dyn gpui::Action>),
+                Rc::new(|window: &mut Window, cx: &mut App| {
+                    window.dispatch_action(Box::new(OpenSvgPreview), cx);
+                }) as Rc<dyn Fn(&mut Window, &mut App)>,
             ));
         }
 

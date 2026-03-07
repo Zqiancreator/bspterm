@@ -2831,27 +2831,22 @@ impl Pane {
 
                             let extra_actions =
                                 item_handle.tab_extra_context_menu_actions(window, cx);
-                            if let Some((_, action)) = extra_actions
+                            if let Some((_, _, handler)) = extra_actions
                                 .into_iter()
-                                .find(|(l, _)| l.as_ref() == action_label.as_ref())
+                                .find(|(l, _, _)| l.as_ref() == action_label.as_ref())
                             {
-                                let focus_handle = item_handle.item_focus_handle(cx);
-                                focus_handle.dispatch_action(&*action, window, cx);
+                                handler(window, cx);
                                 return;
                             }
                         } else {
                             // Default behavior for non-terminal items: try "Rename"
                             let extra_actions =
                                 item_handle.tab_extra_context_menu_actions(window, cx);
-                            if let Some((_, action)) = extra_actions
+                            if let Some((_, _, handler)) = extra_actions
                                 .into_iter()
-                                .find(|(label, _)| label.as_ref() == "Rename")
+                                .find(|(label, _, _)| label.as_ref() == "Rename")
                             {
-                                // Dispatch action directly through the focus handle to avoid
-                                // relay_action's intermediate focus step which can interfere
-                                // with inline editors.
-                                let focus_handle = item_handle.item_focus_handle(cx);
-                                focus_handle.dispatch_action(&*action, window, cx);
+                                handler(window, cx);
                                 return;
                             }
                         }
@@ -3060,8 +3055,9 @@ impl Pane {
                     if let Some(pane) = pane.upgrade() {
                         // Add extra actions at top if requested
                         if menu_options.extra_actions_at_top && !extra_actions.is_empty() {
-                            for (label, action) in extra_actions.iter() {
-                                menu = menu.action(label.clone(), action.boxed_clone());
+                            for (label, action, handler) in extra_actions.iter() {
+                                let handler = handler.clone();
+                                menu = menu.entry(label.clone(), action.as_ref().map(|a| a.boxed_clone()), move |window, cx| handler(window, cx));
                             }
                             menu = menu.separator();
                         }
@@ -3316,8 +3312,8 @@ impl Pane {
                     // Add custom item-specific actions at bottom (if not already added at top)
                     if !menu_options.extra_actions_at_top && !extra_actions.is_empty() {
                         menu = menu.separator();
-                        for (label, action) in extra_actions {
-                            menu = menu.action(label, action);
+                        for (label, action, handler) in extra_actions {
+                            menu = menu.entry(label, action, move |window, cx| handler(window, cx));
                         }
                     }
 

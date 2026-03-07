@@ -4397,24 +4397,82 @@ impl Item for TerminalView {
         &self,
         _window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Vec<(SharedString, Box<dyn gpui::Action>)> {
+    ) -> Vec<(SharedString, Option<Box<dyn gpui::Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> {
         let terminal = self.terminal.read(cx);
-        let mut actions = Vec::new();
+        let terminal_entity = self.terminal.clone();
+        let weak_view = cx.weak_entity();
+        let mut actions: Vec<(SharedString, Option<Box<dyn gpui::Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> = Vec::new();
 
         if terminal.connection_info().is_some() {
             if terminal.is_disconnected() {
-                actions.push((t("terminal.reconnect"), Box::new(ReconnectTerminal) as Box<dyn gpui::Action>));
+                let weak_view = weak_view.clone();
+                actions.push((
+                    t("terminal.reconnect"),
+                    Some(Box::new(ReconnectTerminal) as Box<dyn gpui::Action>),
+                    Rc::new(move |window, cx| {
+                        if let Some(view) = weak_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.reconnect_terminal(window, cx);
+                            });
+                        }
+                    }),
+                ));
             } else {
-                actions.push((t("terminal.disconnect"), Box::new(DisconnectTerminal) as Box<dyn gpui::Action>));
+                let terminal_entity = terminal_entity.clone();
+                actions.push((
+                    t("terminal.disconnect"),
+                    Some(Box::new(DisconnectTerminal) as Box<dyn gpui::Action>),
+                    Rc::new(move |_window, cx| {
+                        terminal_entity.update(cx, |terminal, cx| {
+                            terminal.disconnect();
+                            terminal.print_user_disconnection_message(cx);
+                        });
+                    }),
+                ));
             }
         }
 
         if terminal.task().is_none() {
-            actions.push((t("terminal.duplicate_connection"), Box::new(DuplicateTerminal) as Box<dyn gpui::Action>));
-            actions.push((t("terminal.rename"), Box::new(RenameTerminal) as Box<dyn gpui::Action>));
+            {
+                let weak_view = weak_view.clone();
+                actions.push((
+                    t("terminal.duplicate_connection"),
+                    Some(Box::new(DuplicateTerminal) as Box<dyn gpui::Action>),
+                    Rc::new(move |window, cx| {
+                        if let Some(view) = weak_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.duplicate_terminal(window, cx);
+                            });
+                        }
+                    }),
+                ));
+            }
+            {
+                let weak_view = weak_view.clone();
+                actions.push((
+                    t("terminal.rename"),
+                    Some(Box::new(RenameTerminal) as Box<dyn gpui::Action>),
+                    Rc::new(move |window, cx| {
+                        if let Some(view) = weak_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.rename_terminal(&RenameTerminal, window, cx);
+                            });
+                        }
+                    }),
+                ));
+            }
         }
 
-        actions.push((t("terminal.clear_scrollback"), Box::new(ClearScrollback) as Box<dyn gpui::Action>));
+        let terminal_entity = self.terminal.clone();
+        actions.push((
+            t("terminal.clear_scrollback"),
+            Some(Box::new(ClearScrollback) as Box<dyn gpui::Action>),
+            Rc::new(move |_window, cx| {
+                terminal_entity.update(cx, |terminal, _cx| {
+                    terminal.clear_scrollback();
+                });
+            }),
+        ));
 
         actions
     }

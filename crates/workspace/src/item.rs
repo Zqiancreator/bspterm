@@ -397,12 +397,14 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
     }
 
     /// Returns additional actions to add to the tab's context menu.
-    /// Each entry is a label and an action to dispatch.
+    /// Each entry is (label, optional action for keybinding hint, direct handler).
+    /// The handler is called directly, bypassing action dispatch, so it works
+    /// correctly even for non-active tabs.
     fn tab_extra_context_menu_actions(
         &self,
         _window: &mut Window,
         _cx: &mut Context<Self>,
-    ) -> Vec<(SharedString, Box<dyn Action>)> {
+    ) -> Vec<(SharedString, Option<Box<dyn Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> {
         Vec::new()
     }
 
@@ -411,9 +413,9 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         TabContextMenuOptions::default()
     }
 
-    /// Returns the action label to dispatch on tab double-click.
+    /// Returns the action label to invoke on tab double-click.
     /// - Returns `Some(label)` where label matches a label from `tab_extra_context_menu_actions`
-    ///   to dispatch that action on double-click.
+    ///   to invoke that handler on double-click.
     /// - Returns `Some("")` (empty string) to trigger close action.
     /// - Returns `None` to use default behavior (looks for "Rename" action).
     fn tab_double_click_action_label(&self, _cx: &App) -> Option<SharedString> {
@@ -596,7 +598,7 @@ pub trait ItemHandle: 'static + Send {
         &self,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<(SharedString, Box<dyn Action>)>;
+    ) -> Vec<(SharedString, Option<Box<dyn Action>>, Rc<dyn Fn(&mut Window, &mut App)>)>;
     fn tab_context_menu_options(&self, cx: &App) -> TabContextMenuOptions;
     fn tab_double_click_action_label(&self, cx: &App) -> Option<SharedString>;
     fn can_autosave(&self, cx: &App) -> bool {
@@ -1164,7 +1166,7 @@ impl<T: Item> ItemHandle for Entity<T> {
         &self,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<(SharedString, Box<dyn Action>)> {
+    ) -> Vec<(SharedString, Option<Box<dyn Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> {
         self.update(cx, |this, cx| {
             this.tab_extra_context_menu_actions(window, cx)
         })
