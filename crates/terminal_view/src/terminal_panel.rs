@@ -1362,10 +1362,8 @@ impl TerminalPanel {
             }
         }
 
-        // Append any new groups not yet in order, sorted by first tab index
-        // so that newly added groups appear at the bottom
-        let mut remaining: Vec<_> = groups.into_values().collect();
-        remaining.sort_by_key(|g| g.tab_indices.first().copied().unwrap_or(usize::MAX));
+        // Append any remaining groups not yet in group_order
+        let remaining: Vec<_> = groups.into_values().collect();
         for group in remaining {
             if group.key == GroupKey::Other {
                 other_group = Some(group);
@@ -1506,7 +1504,14 @@ fn render_grouped_tab_bar(
         return gpui::Empty.into_any();
     };
 
-    let groups = panel.read(cx).group_terminals_by_session(pane, cx);
+    let groups = panel.update(cx, |panel, cx| {
+        for item in pane.items() {
+            if let Some(tv) = item.downcast::<TerminalView>() {
+                panel.update_group_order_for_terminal(&tv.read(cx), cx);
+            }
+        }
+        panel.group_terminals_by_session(pane, cx)
+    });
 
     if groups.is_empty() {
         return Pane::render_tab_bar(pane, window, cx);
