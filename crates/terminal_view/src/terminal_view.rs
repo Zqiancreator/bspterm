@@ -2870,7 +2870,9 @@ print(output)
         } else {
             terminal_title
         };
-        let buffer_title = format!("{}_{}_{}", timestamp, weekday_cn, short_title);
+        let short_title =
+            short_title.replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], "_");
+        let buffer_title = format!("{}_{}_{}.log", timestamp, weekday_cn, short_title);
         let group_key = self.group_key(cx);
 
         let workspace = self.workspace.clone();
