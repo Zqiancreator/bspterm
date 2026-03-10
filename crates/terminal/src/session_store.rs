@@ -31,6 +31,14 @@ impl CredentialPreset {
     }
 }
 
+/// Sort mode for the session tree display.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SortMode {
+    AdditionOrder,
+    #[default]
+    NameAscending,
+}
+
 /// A node in the session tree, either a group or a session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -73,6 +81,8 @@ pub struct SessionGroup {
     pub name: String,
     #[serde(default = "default_expanded")]
     pub expanded: bool,
+    #[serde(default)]
+    pub pinned: bool,
     pub children: Vec<SessionNode>,
 }
 
@@ -82,6 +92,7 @@ impl SessionGroup {
             id: Uuid::new_v4(),
             name: name.into(),
             expanded: true,
+            pinned: false,
             children: Vec::new(),
         }
     }
@@ -311,6 +322,8 @@ pub struct SessionStore {
     pub root: Vec<SessionNode>,
     #[serde(default)]
     pub credential_presets: Vec<CredentialPreset>,
+    #[serde(default)]
+    pub sort_mode: SortMode,
 }
 
 impl SessionStore {
@@ -321,6 +334,7 @@ impl SessionStore {
             version: Self::CURRENT_VERSION,
             root: Vec::new(),
             credential_presets: Vec::new(),
+            sort_mode: SortMode::default(),
         }
     }
 
@@ -852,6 +866,29 @@ impl SessionStoreEntity {
         let id = group.id;
         self.add_group(group, None, cx);
         id
+    }
+
+    /// Set sort mode and trigger save.
+    pub fn set_sort_mode(&mut self, mode: SortMode, cx: &mut Context<Self>) {
+        self.store.sort_mode = mode;
+        self.schedule_save(cx);
+        cx.emit(SessionStoreEvent::Changed);
+        cx.notify();
+    }
+
+    /// Get current sort mode.
+    pub fn sort_mode(&self) -> SortMode {
+        self.store.sort_mode
+    }
+
+    /// Toggle pinned state for a group and trigger save.
+    pub fn toggle_pin_group(&mut self, group_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(SessionNode::Group(group)) = self.store.find_node_mut(group_id) {
+            group.pinned = !group.pinned;
+            self.schedule_save(cx);
+            cx.emit(SessionStoreEvent::Changed);
+            cx.notify();
+        }
     }
 
     fn schedule_save(&mut self, cx: &mut Context<Self>) {

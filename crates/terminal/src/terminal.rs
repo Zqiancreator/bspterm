@@ -21,7 +21,8 @@ pub use alacritty_terminal;
 
 pub use session_store::{
     AuthMethod, GlobalSessionStore, ProtocolConfig, SessionConfig, SessionGroup, SessionNode,
-    SessionStore, SessionStoreEntity, SessionStoreEvent, SshSessionConfig, TelnetSessionConfig,
+    SessionStore, SessionStoreEntity, SessionStoreEvent, SortMode, SshSessionConfig,
+    TelnetSessionConfig,
 };
 
 pub use button_bar_config::{

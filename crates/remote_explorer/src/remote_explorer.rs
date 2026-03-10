@@ -20,11 +20,11 @@ use lan_discovery::{DiscoveredUser, LanDiscoveryEntity, LanDiscoveryEvent};
 use lan_messaging::{ChatModal, UserIdentity};
 use terminal::{
     AuthMethod, ProtocolConfig, RecognizeConfigEntity, SessionConfig, SessionGroup, SessionNode,
-    SessionStoreEntity, SessionStoreEvent,
+    SessionStoreEntity, SessionStoreEvent, SortMode,
 };
 use ui::{
-    prelude::*, Color, ContextMenu, Disclosure, Icon, IconName, IconSize, Indicator, Label,
-    LabelSize, ListItem, ListItemSpacing, Tooltip, h_flex, v_flex,
+    prelude::*, Color, ContextMenu, Disclosure, Icon, IconName, IconPosition, IconSize, Indicator,
+    Label, LabelSize, ListItem, ListItemSpacing, PopoverMenu, Tooltip, h_flex, v_flex,
 };
 use uuid::Uuid;
 use workspace::{
@@ -286,9 +286,11 @@ impl RemoteExplorer {
     fn update_visible_entries(&mut self, cx: &mut Context<Self>) {
         let session_store = self.session_store.read(cx);
         let store = session_store.store();
+        let sort_mode = store.sort_mode;
 
+        let sorted_root = Self::sort_nodes(&store.root, sort_mode);
         let mut entries = Vec::new();
-        Self::flatten_nodes(&store.root, 0, &mut entries);
+        Self::flatten_nodes_sorted(&sorted_root, 0, sort_mode, &mut entries);
         self.visible_entries = entries;
         self.schedule_ping_for_visible_sessions(cx);
     }
@@ -346,29 +348,121 @@ impl RemoteExplorer {
                     .child(Icon::new(IconName::Server).color(Color::Muted).size(IconSize::Small))
                     .child(Label::new(t("remote_explorer.title")).size(LabelSize::Small)),
             )
-            .child({
-                let icon = if has_expanded {
-                    IconName::CollapseAll
-                } else {
-                    IconName::ExpandAll
-                };
-                panel_icon_button("toggle-collapse", icon)
-                    .icon_size(IconSize::Small)
-                    .tooltip(move |_window, cx| {
-                        Tooltip::for_action_in(
-                            tooltip_text.clone(),
-                            &ToggleCollapseAll,
-                            &focus_handle,
-                            cx,
-                        )
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_collapse_all(&ToggleCollapseAll, window, cx);
-                    }))
-            })
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .child(self.render_sort_button(cx))
+                    .child({
+                        let icon = if has_expanded {
+                            IconName::CollapseAll
+                        } else {
+                            IconName::ExpandAll
+                        };
+                        panel_icon_button("toggle-collapse", icon)
+                            .icon_size(IconSize::Small)
+                            .tooltip(move |_window, cx| {
+                                Tooltip::for_action_in(
+                                    tooltip_text.clone(),
+                                    &ToggleCollapseAll,
+                                    &focus_handle,
+                                    cx,
+                                )
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_collapse_all(&ToggleCollapseAll, window, cx);
+                            }))
+                    }),
+            )
     }
 
-    fn flatten_nodes(nodes: &[SessionNode], depth: usize, result: &mut Vec<FlattenedEntry>) {
+    fn render_sort_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session_store = self.session_store.clone();
+        let current_sort_mode = self.session_store.read(cx).sort_mode();
+
+        PopoverMenu::new("sort-popover")
+            .trigger(
+                panel_icon_button("sort-button", IconName::ListFilter)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text(t("remote_explorer.sort_by"))),
+            )
+            .menu(move |window, cx| {
+                let session_store = session_store.clone();
+                Some(ContextMenu::build(window, cx, move |menu, _window, _cx| {
+                    let session_store_for_name = session_store.clone();
+                    menu.toggleable_entry(
+                        t("remote_explorer.sort_addition_order"),
+                        current_sort_mode == SortMode::AdditionOrder,
+                        IconPosition::Start,
+                        None,
+                        {
+                            let session_store = session_store.clone();
+                            move |_window, cx| {
+                                session_store.update(cx, |store, cx| {
+                                    store.set_sort_mode(SortMode::AdditionOrder, cx);
+                                });
+                            }
+                        },
+                    )
+                    .toggleable_entry(
+                        t("remote_explorer.sort_name_ascending"),
+                        current_sort_mode == SortMode::NameAscending,
+                        IconPosition::Start,
+                        None,
+                        move |_window, cx| {
+                            session_store_for_name.update(cx, |store, cx| {
+                                store.set_sort_mode(SortMode::NameAscending, cx);
+                            });
+                        },
+                    )
+                }))
+            })
+            .anchor(gpui::Corner::TopRight)
+    }
+
+    fn sort_nodes(nodes: &[SessionNode], sort_mode: SortMode) -> Vec<SessionNode> {
+        let mut pinned_groups: Vec<SessionNode> = Vec::new();
+        let mut unpinned_groups: Vec<SessionNode> = Vec::new();
+        let mut sessions: Vec<SessionNode> = Vec::new();
+
+        for node in nodes {
+            match node {
+                SessionNode::Group(group) => {
+                    if group.pinned {
+                        pinned_groups.push(node.clone());
+                    } else {
+                        unpinned_groups.push(node.clone());
+                    }
+                }
+                SessionNode::Session(_) => {
+                    sessions.push(node.clone());
+                }
+            }
+        }
+
+        if sort_mode == SortMode::NameAscending {
+            pinned_groups.sort_by(|a, b| {
+                natural_sort_key(&a.name().to_lowercase())
+                    .cmp(&natural_sort_key(&b.name().to_lowercase()))
+            });
+            unpinned_groups.sort_by(|a, b| {
+                natural_sort_key(&a.name().to_lowercase())
+                    .cmp(&natural_sort_key(&b.name().to_lowercase()))
+            });
+        }
+
+        let mut result = Vec::with_capacity(nodes.len());
+        result.extend(pinned_groups);
+        result.extend(unpinned_groups);
+        result.extend(sessions);
+        result
+    }
+
+    fn flatten_nodes_sorted(
+        nodes: &[SessionNode],
+        depth: usize,
+        sort_mode: SortMode,
+        result: &mut Vec<FlattenedEntry>,
+    ) {
         for node in nodes {
             result.push(FlattenedEntry {
                 id: node.id(),
@@ -378,7 +472,8 @@ impl RemoteExplorer {
 
             if let SessionNode::Group(group) = node {
                 if group.expanded {
-                    Self::flatten_nodes(&group.children, depth + 1, result);
+                    let sorted_children = Self::sort_nodes(&group.children, sort_mode);
+                    Self::flatten_nodes_sorted(&sorted_children, depth + 1, sort_mode, result);
                 }
             }
         }
@@ -577,12 +672,25 @@ impl RemoteExplorer {
                     })
                 })
             }
-            SessionNode::Group(_) => {
+            SessionNode::Group(group) => {
+                let is_pinned = group.pinned;
+                let session_store_for_pin = session_store_entity.clone();
                 let session_store_for_copy = session_store_entity.clone();
                 ContextMenu::build(window, cx, move |menu, _window, _cx| {
                     let workspace_for_edit = workspace.clone();
+                    let pin_label = if is_pinned {
+                        t("remote_explorer.unpin_group")
+                    } else {
+                        t("remote_explorer.pin_group")
+                    };
 
-                    menu.entry(t("remote_explorer.rename_group"), None, move |window, cx| {
+                    menu.entry(pin_label, None, move |_window, cx| {
+                        session_store_for_pin.update(cx, |store, cx| {
+                            store.toggle_pin_group(entry_id, cx);
+                        });
+                    })
+                    .separator()
+                    .entry(t("remote_explorer.rename_group"), None, move |window, cx| {
                         if let Some(workspace) = workspace_for_edit.upgrade() {
                             workspace.update(cx, |ws, cx| {
                                 ws.toggle_modal(window, cx, |window, cx| {
@@ -1134,7 +1242,7 @@ impl RemoteExplorer {
         let depth = entry.depth;
         let is_selected = self.selected_entry_id == Some(id);
 
-        let (icon, name, is_group, is_expanded) = match &entry.node {
+        let (icon, name, is_group, is_expanded, is_pinned) = match &entry.node {
             SessionNode::Group(group) => (
                 if group.expanded {
                     IconName::FolderOpen
@@ -1144,13 +1252,14 @@ impl RemoteExplorer {
                 group.name.clone(),
                 true,
                 Some(group.expanded),
+                group.pinned,
             ),
             SessionNode::Session(session) => {
                 let icon = match &session.protocol {
                     ProtocolConfig::Ssh(_) => IconName::LetterS,
                     ProtocolConfig::Telnet(_) => IconName::LetterT,
                 };
-                (icon, session.name.clone(), false, None)
+                (icon, session.name.clone(), false, None, false)
             }
         };
 
@@ -1237,7 +1346,18 @@ impl RemoteExplorer {
                     })
                     .child(Icon::new(icon).color(Color::Muted).size(IconSize::Small))
             })
-            .child(Label::new(name))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(Label::new(name))
+                    .when(is_pinned, |this| {
+                        this.child(
+                            Icon::new(IconName::Pin)
+                                .color(Color::Muted)
+                                .size(IconSize::XSmall),
+                        )
+                    }),
+            )
             .end_slot({
                 let users = if !is_group {
                     match &entry.node {
@@ -1545,4 +1665,43 @@ impl Panel for RemoteExplorer {
     fn activation_priority(&self) -> u32 {
         0
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum NaturalSortSegment {
+    Number(u64),
+    Text(String),
+}
+
+fn natural_sort_key(name: &str) -> Vec<NaturalSortSegment> {
+    let mut segments = Vec::new();
+    let mut chars = name.chars().peekable();
+
+    while let Some(&character) = chars.peek() {
+        if character.is_ascii_digit() {
+            let mut number_string = String::new();
+            while let Some(&digit) = chars.peek() {
+                if digit.is_ascii_digit() {
+                    number_string.push(digit);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            let value = number_string.parse::<u64>().unwrap_or(0);
+            segments.push(NaturalSortSegment::Number(value));
+        } else {
+            let mut text = String::new();
+            while let Some(&character) = chars.peek() {
+                if character.is_ascii_digit() {
+                    break;
+                }
+                text.push(character);
+                chars.next();
+            }
+            segments.push(NaturalSortSegment::Text(text));
+        }
+    }
+
+    segments
 }

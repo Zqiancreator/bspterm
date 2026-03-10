@@ -193,6 +193,11 @@ remote_explorer:
   copy_env_info: "Copy Environment Info"
   collapse_all: "Collapse All"
   expand_all: "Expand All"
+  sort_by: "Sort By"
+  sort_addition_order: "Addition Order"
+  sort_name_ascending: "Sort by Name"
+  pin_group: "Pin Group"
+  unpin_group: "Unpin Group"
 
   # Ping status
   ping_unknown: "Connectivity unknown"

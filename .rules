@@ -16,7 +16,7 @@ script/linux                       # Install dependencies (Linux)
 ./script/install-linux             # Install local dev build
 ```
 
-**CPU limiting:** Always use `-j 9` with cargo commands (12 cores, keep 3 free). Or `export CARGO_BUILD_JOBS=9`.
+**CPU limiting:** Always use `-j 6` with cargo commands. Or `export CARGO_BUILD_JOBS=6`.
 
 ## High-Level Architecture
 
