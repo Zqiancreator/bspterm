@@ -537,6 +537,11 @@ highlight_edit:
   valid: "有效"
   invalid: "无效"
 
+# Session Log
+session_log:
+  log_path_label: "回显记录路径"
+  ctrl_click_to_reveal: "Ctrl+点击在文件管理器中打开"
+
 # Call Graph Panel
 call_graph:
   title: "调用图"

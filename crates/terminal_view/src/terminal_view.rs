@@ -1245,6 +1245,60 @@ print(output)
         });
     }
 
+    fn render_session_log_indicator(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(log_path) = self.terminal.read(cx).session_log_file_path() else {
+            return div().into_any_element();
+        };
+
+        let filename = log_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| log_path.to_string_lossy().to_string());
+
+        let full_path_display = log_path.to_string_lossy().to_string();
+        let tooltip_text = format!("{}: {}\n{}", t("session_log.log_path_label"), full_path_display, t("session_log.ctrl_click_to_reveal"));
+        let reveal_path = log_path.clone();
+
+        div()
+            .absolute()
+            .bottom_1()
+            .right_2()
+            .child(
+                h_flex()
+                    .id("session-log-indicator")
+                    .gap_1()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .bg(cx.theme().colors().surface_background)
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .opacity(0.7)
+                    .hover(|style| style.opacity(1.0))
+                    .cursor_pointer()
+                    .child(
+                        Icon::new(IconName::FileTextOutlined)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(filename)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .tooltip(Tooltip::text(tooltip_text))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |_this, event: &MouseDownEvent, _window, cx| {
+                            if event.modifiers.secondary() {
+                                cx.reveal_path(&reveal_path);
+                            }
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_button_bar(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(store) = ButtonBarStoreEntity::try_global(cx) else {
             return h_flex().id("terminal-button-bar").into_any_element();
@@ -4131,6 +4185,7 @@ impl Render for TerminalView {
                 // TODO: Oddly this wrapper div is needed for TerminalElement to not steal events from the context menu
                 div()
                     .id("terminal-view-container")
+                    .relative()
                     .flex_1()
                     .size_full()
                     .bg(cx.theme().colors().editor_background)
@@ -4156,7 +4211,8 @@ impl Render for TerminalView {
                             window,
                             cx,
                         )
-                    }),
+                    })
+                    .child(self.render_session_log_indicator(cx)),
             )
             .when(show_button_bar, |this| {
                 this.child(self.render_button_bar(window, cx))

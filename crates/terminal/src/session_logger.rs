@@ -3,7 +3,7 @@ use std::io::{LineWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Datelike, Local};
 
 use crate::terminal_settings::SessionLoggingSettings;
 
@@ -29,11 +29,7 @@ impl SessionMetadata {
     }
 
     pub fn new_ssh(host: String, port: u16, username: Option<String>) -> Self {
-        let session_name = if let Some(ref user) = username {
-            format!("{}@{}_{}", user, host, port)
-        } else {
-            format!("{}_{}", host, port)
-        };
+        let session_name = format!("{}_{}", host, port);
         Self {
             session_name,
             protocol: "ssh".to_string(),
@@ -45,11 +41,7 @@ impl SessionMetadata {
     }
 
     pub fn new_telnet(host: String, port: u16, username: Option<String>) -> Self {
-        let session_name = if let Some(ref user) = username {
-            format!("{}@{}_{}", user, host, port)
-        } else {
-            format!("{}_{}", host, port)
-        };
+        let session_name = format!("{}_{}", host, port);
         Self {
             session_name,
             protocol: "telnet".to_string(),
@@ -218,6 +210,17 @@ fn generate_filename(pattern: &str, metadata: &SessionMetadata) -> String {
     let now = metadata.start_time;
 
     let mut result = pattern.to_string();
+
+    let weekday_cn = match now.weekday() {
+        chrono::Weekday::Mon => "星期一",
+        chrono::Weekday::Tue => "星期二",
+        chrono::Weekday::Wed => "星期三",
+        chrono::Weekday::Thu => "星期四",
+        chrono::Weekday::Fri => "星期五",
+        chrono::Weekday::Sat => "星期六",
+        chrono::Weekday::Sun => "星期日",
+    };
+    result = result.replace("${weekday_cn}", weekday_cn);
 
     result = result.replace("${session_name}", &metadata.session_name);
     result = result.replace("${protocol}", &metadata.protocol);

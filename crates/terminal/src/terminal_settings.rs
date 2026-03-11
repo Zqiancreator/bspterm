@@ -58,7 +58,7 @@ impl Default for SessionLoggingSettings {
         Self {
             enabled: true,
             log_directory: paths::config_dir().join("session_logs"),
-            filename_pattern: "${session_name}_%Y%m%d_%H%M%S.log".to_string(),
+            filename_pattern: "%Y%m%d_%H%M%S_${weekday_cn}_${session_name}.log".to_string(),
             timestamp_format: "[%Y-%m-%d %H:%M:%S] ".to_string(),
             include_ansi_codes: false,
         }

@@ -2434,7 +2434,7 @@ impl Terminal {
 
             // For Enter, check function invocation FIRST (higher priority than abbreviation)
             if is_enter {
-                log::info!(
+                log::debug!(
                     "[function] Enter pressed, function_enabled={}, line_buffer={:?}",
                     function_enabled,
                     self.current_line_buffer
@@ -2664,13 +2664,13 @@ impl Terminal {
         // Get the current line without leading/trailing whitespace
         let line = self.current_line_buffer.trim();
         if line.is_empty() {
-            log::info!("[function] try_invoke_function: line buffer is empty");
+            log::debug!("[function] try_invoke_function: line buffer is empty");
             return None;
         }
 
         // Check if we're at a command position (line start, not after pipes etc.)
         if !self.is_at_function_position() {
-            log::info!("[function] try_invoke_function: not at function position, line={:?}", line);
+            log::debug!("[function] try_invoke_function: not at function position, line={:?}", line);
             return None;
         }
 

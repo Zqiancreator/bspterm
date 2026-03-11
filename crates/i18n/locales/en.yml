@@ -537,6 +537,11 @@ highlight_edit:
   valid: "Valid"
   invalid: "Invalid"
 
+# Session Log
+session_log:
+  log_path_label: "Session log path"
+  ctrl_click_to_reveal: "Ctrl+Click to reveal in file manager"
+
 # Call Graph Panel
 call_graph:
   title: "Call Graph"
