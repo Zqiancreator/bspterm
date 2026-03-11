@@ -154,33 +154,62 @@ impl CommandPanel {
     fn send_to_terminal(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
         let snapshot = editor.buffer().read(cx).snapshot(cx);
+        let selection = editor.selections.newest_anchor();
+        let start = selection.start.to_point(&snapshot);
+        let end = selection.end.to_point(&snapshot);
 
-        // Get cursor position using anchor and convert to point
-        let cursor_anchor = editor.selections.newest_anchor().head();
-        let cursor = cursor_anchor.to_point(&snapshot);
-        let row = cursor.row;
+        // Determine row range: if no selection, send cursor line
+        let (start_row, end_row) = if start == end {
+            (start.row, start.row)
+        } else {
+            (start.row.min(end.row), start.row.max(end.row))
+        };
 
-        // Get current line text
-        let line_len = snapshot.line_len(MultiBufferRow(row));
-        let line_text: String = snapshot
-            .text_for_range(Point::new(row, 0)..Point::new(row, line_len))
-            .collect();
+        // Collect all line texts
+        let mut lines = Vec::new();
+        for row in start_row..=end_row {
+            let line_len = snapshot.line_len(MultiBufferRow(row));
+            let line_text: String = snapshot
+                .text_for_range(Point::new(row, 0)..Point::new(row, line_len))
+                .collect();
+            if !line_text.is_empty() {
+                lines.push(line_text);
+            }
+        }
 
-        if line_text.is_empty() {
+        if lines.is_empty() {
             return;
         }
 
-        if let Some(terminal) = self.get_focused_terminal(cx) {
+        let Some(terminal) = self.get_focused_terminal(cx) else {
+            log::warn!("{}", t("command_panel.no_terminal"));
+            return;
+        };
+
+        if lines.len() == 1 {
             terminal.update(cx, |terminal, _cx| {
-                // Send line with newline
-                let mut text = line_text;
+                let mut text = lines.into_iter().next().unwrap();
                 text.push('\n');
                 terminal.input(text.into_bytes());
             });
         } else {
-            log::warn!("{}", t("command_panel.no_terminal"));
+            cx.spawn(async move |_this, cx| {
+                for line in lines {
+                    cx.update(|cx| {
+                        terminal.update(cx, |terminal, _cx| {
+                            let mut text = line;
+                            text.push('\n');
+                            terminal.input(text.into_bytes());
+                        });
+                    });
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(50))
+                        .await;
+                }
+                anyhow::Ok(())
+            })
+            .detach_and_log_err(cx);
         }
-        // Note: removed self.clear_editor() - keep buffer contents
     }
 
     fn clear_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
