@@ -8,6 +8,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use anyhow::Result;
+use editor::Editor;
 use gpui::{
     Action, AnyElement, App, AppContext as _, AsyncWindowContext, ClickEvent, ClipboardItem,
     Context, DismissEvent, DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable,
@@ -179,6 +180,8 @@ pub struct RemoteExplorer {
     ping_status: HashMap<Uuid, PingStatus>,
     ping_tasks: HashMap<Uuid, Task<()>>,
     ping_refresh_task: Option<Task<()>>,
+    filter_editor: Entity<Editor>,
+    _filter_subscription: Subscription,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -249,6 +252,20 @@ impl RemoteExplorer {
                 }
             });
 
+        let filter_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("remote_explorer.filter_placeholder"), window, cx);
+            editor
+        });
+
+        let filter_subscription =
+            cx.subscribe(&filter_editor, |this, _, event: &editor::EditorEvent, cx| {
+                if matches!(event, editor::EditorEvent::BufferEdited { .. }) {
+                    this.update_visible_entries(cx);
+                    cx.notify();
+                }
+            });
+
         let mut subscriptions = vec![
             session_store_subscription,
             username_subscription,
@@ -275,6 +292,8 @@ impl RemoteExplorer {
             ping_status: HashMap::new(),
             ping_tasks: HashMap::new(),
             ping_refresh_task: None,
+            filter_editor,
+            _filter_subscription: filter_subscription,
             _subscriptions: subscriptions,
         };
 
@@ -289,10 +308,108 @@ impl RemoteExplorer {
         let sort_mode = store.sort_mode;
 
         let sorted_root = Self::sort_nodes(&store.root, sort_mode);
+
+        let filter_query = self.filter_editor.read(cx).text(cx);
+        let filter_query = filter_query.trim().to_lowercase();
+
+        let filtered_root = if filter_query.is_empty() {
+            sorted_root
+        } else {
+            Self::filter_nodes(&sorted_root, &filter_query)
+        };
+
         let mut entries = Vec::new();
-        Self::flatten_nodes_sorted(&sorted_root, 0, sort_mode, &mut entries);
+        if filter_query.is_empty() {
+            Self::flatten_nodes_sorted(&filtered_root, 0, sort_mode, &mut entries);
+        } else {
+            Self::flatten_nodes_expanded(&filtered_root, 0, sort_mode, &mut entries);
+        }
         self.visible_entries = entries;
         self.schedule_ping_for_visible_sessions(cx);
+    }
+
+    fn filter_nodes(nodes: &[SessionNode], query: &str) -> Vec<SessionNode> {
+        nodes
+            .iter()
+            .filter_map(|node| match node {
+                SessionNode::Group(group) => {
+                    if group.name.to_lowercase().contains(query) {
+                        return Some(node.clone());
+                    }
+                    if Self::group_has_matching_session(group, query) {
+                        return Some(node.clone());
+                    }
+                    let filtered_children = Self::filter_nodes(&group.children, query);
+                    if !filtered_children.is_empty() {
+                        let mut filtered_group = group.clone();
+                        filtered_group.children = filtered_children;
+                        return Some(SessionNode::Group(filtered_group));
+                    }
+                    None
+                }
+                SessionNode::Session(session) => {
+                    if Self::session_matches(session, query) {
+                        Some(node.clone())
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect()
+    }
+
+    fn session_matches(session: &SessionConfig, query: &str) -> bool {
+        if session.name.to_lowercase().contains(query) {
+            return true;
+        }
+        if session.tags.iter().any(|tag| tag.to_lowercase().contains(query)) {
+            return true;
+        }
+        match &session.protocol {
+            ProtocolConfig::Ssh(ssh) => {
+                ssh.host.to_lowercase().contains(query)
+                    || ssh
+                        .username
+                        .as_deref()
+                        .is_some_and(|u| u.to_lowercase().contains(query))
+            }
+            ProtocolConfig::Telnet(telnet) => {
+                telnet.host.to_lowercase().contains(query)
+                    || telnet
+                        .username
+                        .as_deref()
+                        .is_some_and(|u| u.to_lowercase().contains(query))
+            }
+        }
+    }
+
+    fn group_has_matching_session(group: &SessionGroup, query: &str) -> bool {
+        group.children.iter().any(|child| match child {
+            SessionNode::Session(session) => Self::session_matches(session, query),
+            SessionNode::Group(child_group) => {
+                Self::group_has_matching_session(child_group, query)
+            }
+        })
+    }
+
+    fn flatten_nodes_expanded(
+        nodes: &[SessionNode],
+        depth: usize,
+        sort_mode: SortMode,
+        result: &mut Vec<FlattenedEntry>,
+    ) {
+        for node in nodes {
+            result.push(FlattenedEntry {
+                id: node.id(),
+                depth,
+                node: node.clone(),
+            });
+
+            if let SessionNode::Group(group) = node {
+                let sorted_children = Self::sort_nodes(&group.children, sort_mode);
+                Self::flatten_nodes_expanded(&sorted_children, depth + 1, sort_mode, result);
+            }
+        }
     }
 
     fn has_any_expanded_group(&self, cx: &App) -> bool {
@@ -373,6 +490,35 @@ impl RemoteExplorer {
                             }))
                     }),
             )
+    }
+
+    fn render_filter_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let has_query = !self.filter_editor.read(cx).text(cx).is_empty();
+
+        h_flex()
+            .w_full()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .border_b_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(
+                Icon::new(IconName::MagnifyingGlass)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(self.filter_editor.clone())
+            .when(has_query, |this| {
+                this.child(
+                    panel_icon_button("clear-filter", IconName::Close)
+                        .icon_size(IconSize::Small)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.filter_editor.update(cx, |editor, cx| {
+                                editor.set_text("", window, cx);
+                            });
+                        })),
+                )
+            })
     }
 
     fn render_sort_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1525,6 +1671,7 @@ impl Render for RemoteExplorer {
             .track_focus(&self.focus_handle(cx))
             .on_action(cx.listener(Self::toggle_collapse_all))
             .child(self.render_title_bar(window, cx))
+            .child(self.render_filter_bar(cx))
             .child(
                 v_flex()
                     .w_full()

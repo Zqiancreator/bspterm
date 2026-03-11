@@ -199,6 +199,8 @@ remote_explorer:
   pin_group: "Pin Group"
   unpin_group: "Unpin Group"
 
+  filter_placeholder: "Filter sessions..."
+
   # Ping status
   ping_unknown: "Connectivity unknown"
   ping_checking: "Checking..."
