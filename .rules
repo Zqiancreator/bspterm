@@ -156,6 +156,14 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
 - **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
 
+## Terminal Input Buffers & Paste
+
+`paste()` 先 `clear_input_buffers()` 再 `update_input_buffers(normalized_bytes)`，保证粘贴后 `current_line_buffer` / `current_word_buffer` 反映粘贴内容（用于缩写展开、函数触发等）。
+
+- 换行归一化：`\r\n` → `\r`，`\n` → `\r`；`\r` 在 `update_input_buffers` 中清空两个 buffer，所以多行粘贴后 buffer 只保留最后一行
+- `current_word_buffer` 仅在 `\r`/`\n`/`\t`/Ctrl+C/Ctrl+D 时清空，space 不会重置（space 直接 push 到 word buffer）
+- 测试：`tests::paste_tests`（4 个用例），使用 `TerminalBuilder::new_display_only` 构建无 PTY 终端。`cargo test -p terminal test_paste -j 6`
+
 ## Terminal Python Scripting
 
 Unix socket JSON-RPC in `crates/terminal_scripting/` and `crates/script_panel/`.

@@ -2862,10 +2862,13 @@ impl Terminal {
     pub fn paste(&mut self, text: &str) {
         self.clear_input_buffers();
 
+        let clean_text = text.replace("\r\n", "\r").replace('\n', "\r");
+        self.update_input_buffers(clean_text.as_bytes());
+
         let paste_text = if self.last_content.mode.contains(TermMode::BRACKETED_PASTE) {
             format!("{}{}{}", "\x1b[200~", text.replace('\x1b', ""), "\x1b[201~")
         } else {
-            text.replace("\r\n", "\r").replace('\n', "\r")
+            clean_text
         };
 
         self.input(paste_text.into_bytes());
@@ -5346,7 +5349,7 @@ mod tests {
             .await;
 
         // Kill the active task
-        terminal.update(cx, |term, _cx| {
+        terminal.update(cx, |term: &mut Terminal, _cx| {
             term.kill_active_task();
         });
 
@@ -5388,7 +5391,7 @@ mod tests {
         assert_eq!(exit_status, Some(ExitStatus::default()));
 
         // Now try to kill - should be a no-op since task already completed
-        terminal.update(cx, |term, _cx| {
+        terminal.update(cx, |term: &mut Terminal, _cx| {
             term.kill_active_task();
         });
 
@@ -5496,6 +5499,81 @@ mod tests {
                 scroll_by(1);
                 scroll_by(-1);
             }
+        }
+    }
+
+    mod paste_tests {
+        use super::super::*;
+        use gpui::{Entity, TestAppContext};
+
+        fn build_display_only_terminal(cx: &mut TestAppContext) -> Entity<Terminal> {
+            cx.update(|cx| {
+                let settings_store = settings::SettingsStore::test(cx);
+                cx.set_global(settings_store);
+            });
+
+            let window = cx.add_empty_window();
+            let builder = window
+                .update(|_window, cx| {
+                    TerminalBuilder::new_display_only(
+                        CursorShape::default(),
+                        AlternateScroll::On,
+                        None,
+                        0,
+                        cx.background_executor(),
+                        PathStyle::local(),
+                    )
+                    .unwrap()
+                });
+            window.new(|cx| builder.subscribe(cx))
+        }
+
+        #[gpui::test]
+        async fn test_paste_updates_line_buffer(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.paste("hello world");
+                assert_eq!(term.current_line_buffer, "hello world");
+                // Space is appended to word buffer (not a word boundary reset),
+                // so word buffer contains everything since last clear.
+                assert_eq!(term.current_word_buffer, "hello world");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_paste_clears_previous_buffer(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"old");
+                assert_eq!(term.current_line_buffer, "old");
+
+                term.paste("new");
+                assert_eq!(term.current_line_buffer, "new");
+                assert_eq!(term.current_word_buffer, "new");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_paste_multiline_keeps_last_line(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.paste("line1\nline2\nline3");
+                assert_eq!(term.current_line_buffer, "line3");
+
+                term.paste("line1\r\nline2");
+                assert_eq!(term.current_line_buffer, "line2");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_paste_with_crlf_normalization(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                // \r\n gets normalized to \r, which clears buffer, then "b" remains
+                term.paste("a\r\nb");
+                assert_eq!(term.current_line_buffer, "b");
+                assert_eq!(term.current_word_buffer, "b");
+            });
         }
     }
 }
