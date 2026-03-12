@@ -2874,6 +2874,22 @@ impl Terminal {
         self.input(paste_text.into_bytes());
     }
 
+    /// Paste a single line into the terminal (for line-by-line paste mode).
+    /// first_line: if true, clears input buffers before sending.
+    pub fn paste_line(&mut self, line: &str, first_line: bool) {
+        if first_line {
+            self.clear_input_buffers();
+        }
+        let mut text = line.to_string();
+        text.push('\r');
+        self.update_input_buffers(text.as_bytes());
+        self.input(text.into_bytes());
+    }
+
+    pub fn is_bracketed_paste_mode(&self) -> bool {
+        self.last_content.mode.contains(TermMode::BRACKETED_PASTE)
+    }
+
     pub fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let term = self.term.clone();
         let mut terminal = term.lock_unfair();
@@ -5573,6 +5589,37 @@ mod tests {
                 term.paste("a\r\nb");
                 assert_eq!(term.current_line_buffer, "b");
                 assert_eq!(term.current_word_buffer, "b");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_paste_line_first_clears_buffers(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"old");
+                assert_eq!(term.current_line_buffer, "old");
+
+                term.paste_line("new_line", true);
+                // first_line=true clears buffers, then appends "new_line\r"
+                // \r clears line buffer, so it ends empty
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_paste_line_subsequent_appends(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.paste_line("line1", true);
+                // After \r, buffers are cleared
+                assert_eq!(term.current_line_buffer, "");
+
+                term.paste_line("line2", false);
+                // first_line=false does not clear buffers before appending
+                // but \r at end clears them again
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
             });
         }
     }

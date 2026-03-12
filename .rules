@@ -153,6 +153,7 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Function Bar**: `function_store.rs` + `function_bar.rs` — custom buttons with parameter UI modal (string/number/boolean/choice/password types)
 - **Export with Timestamp**: Terminal content export supports optional timestamp prefix per line
 - **Multiline Command**: Command panel sends multi-line commands line by line with 50ms interval
+- **Multiline Paste**: `terminal_view.rs` paste handler auto-detects bracketed paste mode — enabled: one-shot send (standard behavior); disabled: line-by-line send with 50ms delay (for GDB, network CLI etc.). Uses `Terminal::paste_line()` + `is_bracketed_paste_mode()`
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
 - **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
 
@@ -162,7 +163,9 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 
 - 换行归一化：`\r\n` → `\r`，`\n` → `\r`；`\r` 在 `update_input_buffers` 中清空两个 buffer，所以多行粘贴后 buffer 只保留最后一行
 - `current_word_buffer` 仅在 `\r`/`\n`/`\t`/Ctrl+C/Ctrl+D 时清空，space 不会重置（space 直接 push 到 word buffer）
-- 测试：`tests::paste_tests`（4 个用例），使用 `TerminalBuilder::new_display_only` 构建无 PTY 终端。`cargo test -p terminal test_paste -j 6`
+- `paste_line(line, first_line)`: 逐行发送模式，追加 `\r` 后调用 `input()`；`first_line=true` 时先清空 buffer
+- `is_bracketed_paste_mode()`: 检查 `TermMode::BRACKETED_PASTE` 标志，供 `terminal_view` 决定粘贴策略
+- 测试：`tests::paste_tests`（6 个用例），使用 `TerminalBuilder::new_display_only` 构建无 PTY 终端。`cargo test -p terminal test_paste -j 6`
 
 ## Terminal Python Scripting
 

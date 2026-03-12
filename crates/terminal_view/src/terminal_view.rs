@@ -3164,8 +3164,29 @@ print(output)
         }
 
         if let Some(text) = clipboard.text() {
-            self.terminal
-                .update(cx, |terminal, _cx| terminal.paste(&text));
+            let is_multiline = text.contains('\n') || text.contains("\r\n");
+            let is_bracketed = self.terminal.read(cx).is_bracketed_paste_mode();
+
+            if is_multiline && !is_bracketed {
+                let lines: Vec<String> = text.lines().map(String::from).collect();
+                let terminal = self.terminal.clone();
+                cx.spawn(async move |_this, cx| {
+                    for (index, line) in lines.iter().enumerate() {
+                        terminal.update(cx, |terminal, _cx| {
+                            terminal.paste_line(line, index == 0);
+                        });
+                        if index < lines.len() - 1 {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(50))
+                                .await;
+                        }
+                    }
+                })
+                .detach();
+            } else {
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.paste(&text));
+            }
         }
     }
 
