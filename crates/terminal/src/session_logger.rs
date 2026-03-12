@@ -14,6 +14,7 @@ pub struct SessionMetadata {
     pub port: Option<u16>,
     pub username: Option<String>,
     pub start_time: DateTime<Local>,
+    pub group_path: Vec<String>,
 }
 
 impl SessionMetadata {
@@ -25,10 +26,16 @@ impl SessionMetadata {
             port: None,
             username: None,
             start_time: Local::now(),
+            group_path: Vec::new(),
         }
     }
 
-    pub fn new_ssh(host: String, port: u16, username: Option<String>) -> Self {
+    pub fn new_ssh(
+        host: String,
+        port: u16,
+        username: Option<String>,
+        group_path: Vec<String>,
+    ) -> Self {
         let session_name = format!("{}_{}", host, port);
         Self {
             session_name,
@@ -37,10 +44,16 @@ impl SessionMetadata {
             port: Some(port),
             username,
             start_time: Local::now(),
+            group_path,
         }
     }
 
-    pub fn new_telnet(host: String, port: u16, username: Option<String>) -> Self {
+    pub fn new_telnet(
+        host: String,
+        port: u16,
+        username: Option<String>,
+        group_path: Vec<String>,
+    ) -> Self {
         let session_name = format!("{}_{}", host, port);
         Self {
             session_name,
@@ -49,6 +62,7 @@ impl SessionMetadata {
             port: Some(port),
             username,
             start_time: Local::now(),
+            group_path,
         }
     }
 }
@@ -79,7 +93,13 @@ impl SessionLogger {
             return Ok(());
         }
 
-        let log_dir = expand_path(&self.settings.log_directory)?;
+        let base_log_dir = expand_path(&self.settings.log_directory)?;
+        let log_dir = self
+            .metadata
+            .group_path
+            .iter()
+            .map(|component| sanitize_filename(component))
+            .fold(base_log_dir, |path, component| path.join(component));
         log::debug!("Session log directory: {:?}", log_dir);
         std::fs::create_dir_all(&log_dir)
             .with_context(|| format!("Failed to create log directory: {:?}", log_dir))?;
@@ -354,6 +374,7 @@ mod tests {
             port: Some(22),
             username: Some("user".to_string()),
             start_time: Local::now(),
+            group_path: Vec::new(),
         };
 
         let pattern = "${session_name}_${protocol}.log";

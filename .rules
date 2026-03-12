@@ -154,6 +154,7 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Export with Timestamp**: Terminal content export supports optional timestamp prefix per line
 - **Multiline Command**: Command panel sends multi-line commands line by line with 50ms interval
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
+- **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
 
 ## Terminal Python Scripting
 

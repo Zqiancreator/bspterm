@@ -14,7 +14,7 @@ src/
 │   ├── ssh/              # SSH connection (auth, session, terminal adapter)
 │   └── telnet/           # Telnet connection (protocol, session, terminal adapter)
 ├── session_store.rs      # Session persistence in tree structure
-├── session_logger.rs     # Terminal output logging
+├── session_logger.rs     # Terminal output logging (group-path subdirectories)
 ├── active_session_tracker.rs  # GPUI entity for active sessions
 ├── rule_store.rs         # Automation rule data model (uses JsonConfigStore)
 ├── rule_engine.rs        # Rule execution with regex matching

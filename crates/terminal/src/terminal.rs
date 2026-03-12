@@ -880,10 +880,17 @@ impl TerminalBuilder {
             "SSH terminal session_logging settings: enabled={}",
             session_logging_settings.enabled
         );
+        let group_path = session_id
+            .and_then(|id| {
+                crate::session_store::SessionStoreEntity::try_global(cx)
+                    .map(|store| store.read(cx).store().get_group_path(id))
+            })
+            .unwrap_or_default();
         let session_logger_metadata = session_logger::SessionMetadata::new_ssh(
             ssh_config.host.clone(),
             ssh_config.port,
             ssh_config.username.clone(),
+            group_path,
         );
 
         let connection_info = ConnectionInfo::Ssh {
@@ -1070,10 +1077,17 @@ impl TerminalBuilder {
             "Telnet terminal session_logging settings: enabled={}",
             session_logging_settings.enabled
         );
+        let group_path = session_id
+            .and_then(|id| {
+                crate::session_store::SessionStoreEntity::try_global(cx)
+                    .map(|store| store.read(cx).store().get_group_path(id))
+            })
+            .unwrap_or_default();
         let session_logger_metadata = session_logger::SessionMetadata::new_telnet(
             telnet_config.host.clone(),
             telnet_config.port,
             telnet_config.username.clone(),
+            group_path,
         );
 
         let connection_info = ConnectionInfo::Telnet {
@@ -1509,6 +1523,22 @@ pub enum ConnectionInfo {
         password: Option<String>,
         session_id: Option<uuid::Uuid>,
     },
+}
+
+fn resolve_group_path(connection_info: &Option<ConnectionInfo>, cx: &App) -> Vec<String> {
+    let session_id = match connection_info {
+        Some(ConnectionInfo::Ssh { session_id, .. }) | Some(ConnectionInfo::Telnet { session_id, .. }) => {
+            match session_id {
+                Some(id) => *id,
+                None => return Vec::new(),
+            }
+        }
+        None => return Vec::new(),
+    };
+    let Some(store_entity) = crate::session_store::SessionStoreEntity::try_global(cx) else {
+        return Vec::new();
+    };
+    store_entity.read(cx).store().get_group_path(session_id)
 }
 
 pub struct Terminal {
@@ -3587,6 +3617,7 @@ impl Terminal {
         }
 
         let settings = TerminalSettings::get_global(cx).session_logging.clone();
+        let group_path = resolve_group_path(&self.connection_info, cx);
         let metadata = match &self.connection_info {
             Some(ConnectionInfo::Ssh {
                 host,
@@ -3597,6 +3628,7 @@ impl Terminal {
                 host.clone(),
                 *port,
                 username.clone(),
+                group_path,
             ),
             Some(ConnectionInfo::Telnet {
                 host,
@@ -3607,6 +3639,7 @@ impl Terminal {
                 host.clone(),
                 *port,
                 username.clone(),
+                group_path,
             ),
             None => session_logger::SessionMetadata::new_local(),
         };
@@ -4064,21 +4097,30 @@ impl Terminal {
             return;
         }
 
+        let group_path = resolve_group_path(&self.connection_info, cx);
         let metadata = match &self.connection_info {
             Some(ConnectionInfo::Ssh {
                 host,
                 port,
                 username,
                 ..
-            }) => session_logger::SessionMetadata::new_ssh(host.clone(), *port, username.clone()),
+            }) => session_logger::SessionMetadata::new_ssh(
+                host.clone(),
+                *port,
+                username.clone(),
+                group_path,
+            ),
             Some(ConnectionInfo::Telnet {
                 host,
                 port,
                 username,
                 ..
-            }) => {
-                session_logger::SessionMetadata::new_telnet(host.clone(), *port, username.clone())
-            }
+            }) => session_logger::SessionMetadata::new_telnet(
+                host.clone(),
+                *port,
+                username.clone(),
+                group_path,
+            ),
             None => session_logger::SessionMetadata::new_local(),
         };
 

@@ -524,6 +524,19 @@ impl SessionStore {
         None
     }
 
+    /// Build the full group path from root to the parent group of a session.
+    /// Returns an empty Vec if the session is at root level or not found.
+    pub fn get_group_path(&self, session_id: Uuid) -> Vec<String> {
+        let mut path = Vec::new();
+        let mut current_id = session_id;
+        while let Some(parent) = self.find_parent_group(current_id) {
+            path.push(parent.name.clone());
+            current_id = parent.id;
+        }
+        path.reverse();
+        path
+    }
+
     /// Check if ancestor_id is an ancestor of node_id.
     /// Returns true if node_id is contained within ancestor_id (directly or nested).
     pub fn is_ancestor_of(&self, ancestor_id: Uuid, node_id: Uuid) -> bool {
