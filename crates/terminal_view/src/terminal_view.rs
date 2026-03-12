@@ -2923,7 +2923,7 @@ print(output)
             chrono::Weekday::Sat => "星期六",
             chrono::Weekday::Sun => "星期日",
         };
-        let timestamp = now.format("%Y-%m-%d %H.%M.%S");
+        let timestamp = now.format("%Y-%m-%d_%H.%M.%S");
         let max_title_len = 20;
         let short_title = if terminal_title.chars().count() > max_title_len {
             let truncated: String = terminal_title.chars().take(max_title_len).collect();

@@ -1828,8 +1828,8 @@
       "log_directory": "~/.config/bspterm/session_logs",
       // Pattern for log file naming.
       // Supports: %Y, %m, %d, %H, %M, %S (strftime),
-      // ${session_name}, ${protocol}, ${host}, ${port}, ${username}
-      "filename_pattern": "${session_name}_%Y%m%d_%H%M%S.log",
+      // ${session_name}, ${protocol}, ${host}, ${port}, ${username}, ${weekday_cn}
+      "filename_pattern": "%Y%m%d_%H%M%S_${session_name}_${weekday_cn}.log",
       // Format string for timestamps prepended to each line.
       // Empty string disables timestamps.
       "timestamp_format": "[%Y-%m-%d %H:%M:%S] ",

@@ -503,9 +503,9 @@ pub struct SessionLoggingContent {
 
     /// Pattern for log file naming.
     /// Supports: %Y, %m, %d, %H, %M, %S (strftime),
-    /// ${session_name}, ${protocol}, ${host}, ${port}, ${username}
+    /// ${session_name}, ${protocol}, ${host}, ${port}, ${username}, ${weekday_cn}
     ///
-    /// Default: "${session_name}_%Y%m%d_%H%M%S.log"
+    /// Default: "%Y%m%d_%H%M%S_${session_name}_${weekday_cn}.log"
     pub filename_pattern: Option<String>,
 
     /// Format string for timestamps prepended to each line.
