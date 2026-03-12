@@ -3,7 +3,7 @@ use bspterm_actions::command_panel::{
     AddTab, Clear, CloseTab, Send, StartCycleSend, StopCycleSend, ToggleFocus,
 };
 use collections::HashMap;
-use editor::{Editor, EditorMode, MultiBuffer, ToPoint};
+use editor::{Editor, EditorEvent, EditorMode, MultiBuffer, ToPoint};
 use gpui::{
     Action, App, ClickEvent, Context, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
     IntoElement, MouseButton, Pixels, Render, Styled, Subscription, Task, WeakEntity, Window, px,
@@ -56,6 +56,8 @@ struct CommandTab {
 struct CommandTabsConfig {
     tabs: Vec<UserTabConfig>,
     cycle_interval_ms: u64,
+    #[serde(default)]
+    cycle_content: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +79,7 @@ pub struct CommandPanel {
     cycle_running: bool,
     renaming_tab: Option<usize>,
     rename_editor: Option<Entity<Editor>>,
+    save_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -105,6 +108,11 @@ impl CommandPanel {
 
         if let Some(config) = Self::load_tabs_config() {
             cycle_interval_ms = config.cycle_interval_ms;
+            if !config.cycle_content.is_empty() {
+                tabs[1].editor.update(cx, |editor, cx| {
+                    editor.set_text(config.cycle_content, window, cx);
+                });
+            }
             for user_tab in config.tabs {
                 let id = Uuid::parse_str(&user_tab.id).unwrap_or_else(|_| Uuid::new_v4());
                 let editor = Self::create_tab_editor(window, cx);
@@ -124,11 +132,21 @@ impl CommandPanel {
             }
         }
 
-        let subscriptions = if let Some(ws) = workspace.upgrade() {
+        let mut subscriptions = if let Some(ws) = workspace.upgrade() {
             vec![cx.subscribe_in(&ws, window, Self::handle_workspace_event)]
         } else {
             vec![]
         };
+
+        // Subscribe to editor changes for debounced save (skip terminal-specific tab at index 0)
+        for tab in tabs.iter().skip(1) {
+            let editor = &tab.editor;
+            subscriptions.push(cx.subscribe(editor, |this, _editor, event: &EditorEvent, cx| {
+                if matches!(event, EditorEvent::BufferEdited) {
+                    this.schedule_debounced_save(cx);
+                }
+            }));
+        }
 
         Self {
             tabs,
@@ -142,6 +160,7 @@ impl CommandPanel {
             cycle_running: false,
             renaming_tab: None,
             rename_editor: None,
+            save_task: None,
             _subscriptions: subscriptions,
         }
     }
@@ -337,6 +356,7 @@ impl CommandPanel {
 
         let editor = self.active_editor().clone();
         Self::send_from_editor(&editor, &terminal, cx);
+        self.schedule_save(cx);
     }
 
     fn clear_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -345,6 +365,7 @@ impl CommandPanel {
             editor.select_all(&editor::actions::SelectAll, window, cx);
             editor.delete(&editor::actions::Delete, window, cx);
         });
+        self.schedule_save(cx);
     }
 
     fn start_cycle_send(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -444,6 +465,12 @@ impl CommandPanel {
         );
         let id = Uuid::new_v4();
         let editor = Self::create_tab_editor(window, cx);
+
+        self._subscriptions.push(cx.subscribe(&editor, |this, _editor, event: &EditorEvent, cx| {
+            if matches!(event, EditorEvent::BufferEdited) {
+                this.schedule_debounced_save(cx);
+            }
+        }));
 
         self.tabs.push(CommandTab {
             kind: CommandTabKind::UserTab { id, name },
@@ -558,9 +585,12 @@ impl CommandPanel {
             }
         }
 
+        let cycle_content = self.tabs[1].editor.read(cx).text(cx);
+
         let config = CommandTabsConfig {
             tabs: user_tabs,
             cycle_interval_ms: self.cycle_interval_ms,
+            cycle_content,
         };
 
         cx.background_spawn(async move {
@@ -573,6 +603,20 @@ impl CommandPanel {
             }
         })
         .detach();
+    }
+
+    fn schedule_debounced_save(&mut self, cx: &mut Context<Self>) {
+        self.save_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(100))
+                .await;
+            cx.update(|cx| {
+                this.update(cx, |this, cx| {
+                    this.schedule_save(cx);
+                })
+            })
+            .ok();
+        }));
     }
 
     fn render_hint_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
