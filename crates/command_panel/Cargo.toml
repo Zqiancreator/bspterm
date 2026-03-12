@@ -28,3 +28,7 @@ workspace.workspace = true
 bspterm_actions.workspace = true
 settings.workspace = true
 collections.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+paths.workspace = true

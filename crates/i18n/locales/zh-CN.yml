@@ -83,7 +83,7 @@ menu:
   split_right: "向右拆分"
   remote_explorer: "远程资源管理器"
   terminal_panel: "终端面板"
-  command_panel: "命令面板"
+  command_panel: "命令发送区域"
   outline_panel: "大纲面板"
   project_panel: "项目面板"
   toggle_gpui_inspector: "切换 GPUI 检查器"
@@ -264,12 +264,21 @@ script_params:
 
 # Command Panel
 command_panel:
-  title: "命令面板"
+  title: "命令发送区域"
   hint: "Enter: 换行 | Ctrl+Enter: 发送"
   send_tooltip: "发送到终端"
   clear_tooltip: "清除"
   placeholder: "在此输入命令..."
   no_terminal: "没有聚焦的终端"
+  tab_terminal: "终端"
+  tab_cycle: "循环下发"
+  cycle_interval: "间隔:"
+  cycle_start: "开始"
+  cycle_stop: "停止"
+  add_tab: "新建标签"
+  rename_tab: "重命名"
+  default_tab_name: "标签"
+  cycle_ms: "ms"
 
 # Rule Editor Panel
 rule_editor:

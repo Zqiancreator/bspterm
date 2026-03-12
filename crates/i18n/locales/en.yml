@@ -83,7 +83,7 @@ menu:
   split_right: "Split Right"
   remote_explorer: "Remote Explorer"
   terminal_panel: "Terminal Panel"
-  command_panel: "Command Panel"
+  command_panel: "Command Send Area"
   outline_panel: "Outline Panel"
   project_panel: "Project Panel"
   toggle_gpui_inspector: "Toggle GPUI Inspector"
@@ -264,12 +264,21 @@ script_params:
 
 # Command Panel
 command_panel:
-  title: "Command Panel"
+  title: "Command Send Area"
   hint: "Enter: New line | Ctrl+Enter: Send"
   send_tooltip: "Send to Terminal"
   clear_tooltip: "Clear"
   placeholder: "Type commands here..."
   no_terminal: "No terminal focused"
+  tab_terminal: "Terminal"
+  tab_cycle: "Cycle Send"
+  cycle_interval: "Interval:"
+  cycle_start: "Start"
+  cycle_stop: "Stop"
+  add_tab: "New Tab"
+  rename_tab: "Rename"
+  default_tab_name: "Tab"
+  cycle_ms: "ms"
 
 # Rule Editor Panel
 rule_editor:

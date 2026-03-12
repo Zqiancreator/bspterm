@@ -3970,11 +3970,15 @@ dependencies = [
  "language",
  "log",
  "multi_buffer",
+ "paths",
+ "serde",
+ "serde_json",
  "settings",
  "terminal",
  "terminal_view",
  "text",
  "ui",
+ "uuid",
  "workspace",
 ]
 

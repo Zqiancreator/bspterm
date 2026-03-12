@@ -284,6 +284,12 @@ pub fn highlight_rules_file() -> &'static PathBuf {
     HIGHLIGHT_RULES_FILE.get_or_init(|| config_dir().join("highlight_rules.json"))
 }
 
+/// Returns the path to the `command_tabs.json` file for command panel tab persistence.
+pub fn command_tabs_file() -> &'static PathBuf {
+    static COMMAND_TABS_FILE: OnceLock<PathBuf> = OnceLock::new();
+    COMMAND_TABS_FILE.get_or_init(|| config_dir().join("command_tabs.json"))
+}
+
 /// Returns the path to the `recognize_config.json` file for auto-recognition configuration.
 pub fn recognize_config_file() -> &'static PathBuf {
     static RECOGNIZE_CONFIG_FILE: OnceLock<PathBuf> = OnceLock::new();

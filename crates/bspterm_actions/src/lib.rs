@@ -427,7 +427,15 @@ pub mod command_panel {
             /// Sends the command panel content to the focused terminal.
             Send,
             /// Clears the command panel content.
-            Clear
+            Clear,
+            /// Adds a new user tab to the command panel.
+            AddTab,
+            /// Closes the current user tab in the command panel.
+            CloseTab,
+            /// Starts cycle send in the command panel.
+            StartCycleSend,
+            /// Stops cycle send in the command panel.
+            StopCycleSend
         ]
     );
 }
