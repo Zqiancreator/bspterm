@@ -354,9 +354,91 @@ impl CommandPanel {
             return;
         };
 
-        let editor = self.active_editor().clone();
-        Self::send_from_editor(&editor, &terminal, cx);
+        if self.active_tab_index == 1 {
+            // Cycle Send tab: Ctrl+Enter toggles cycle send of current/selected lines
+            if self.cycle_running {
+                self.cycle_task = None;
+                self.cycle_running = false;
+                cx.notify();
+            } else {
+                self.start_cycle_send_selected(cx);
+            }
+        } else {
+            let editor = self.active_editor().clone();
+            Self::send_from_editor(&editor, &terminal, cx);
+        }
         self.schedule_save(cx);
+    }
+
+    fn start_cycle_send_selected(&mut self, cx: &mut Context<Self>) {
+        if self.cycle_running {
+            return;
+        }
+
+        // Extract current line or selected lines from the cycle editor
+        let cycle_editor = &self.tabs[1].editor;
+        let editor_read = cycle_editor.read(cx);
+        let snapshot = editor_read.buffer().read(cx).snapshot(cx);
+        let selection = editor_read.selections.newest_anchor();
+        let start = selection.start.to_point(&snapshot);
+        let end = selection.end.to_point(&snapshot);
+
+        let (start_row, end_row) = if start == end {
+            (start.row, start.row)
+        } else {
+            (start.row.min(end.row), start.row.max(end.row))
+        };
+
+        let mut lines = Vec::new();
+        for row in start_row..=end_row {
+            let line_len = snapshot.line_len(MultiBufferRow(row));
+            let line_text: String = snapshot
+                .text_for_range(Point::new(row, 0)..Point::new(row, line_len))
+                .collect();
+            if !line_text.is_empty() {
+                lines.push(line_text);
+            }
+        }
+
+        if lines.is_empty() {
+            return;
+        }
+
+        self.cycle_running = true;
+        let interval_ms = self.cycle_interval_ms;
+        let workspace = self.workspace.clone();
+
+        let task = cx.spawn(async move |_this, cx| {
+            loop {
+                let terminal = cx.update(|cx| {
+                    let workspace = workspace.upgrade()?;
+                    let workspace = workspace.read(cx);
+                    let active_pane = workspace.active_pane().read(cx);
+                    let active_item = active_pane.active_item()?;
+                    let terminal_view = active_item.downcast::<TerminalView>()?;
+                    Some(terminal_view.read(cx).terminal().clone())
+                });
+
+                if let Some(terminal) = terminal {
+                    for line in &lines {
+                        cx.update(|cx| {
+                            terminal.update(cx, |terminal, _cx| {
+                                let mut text = line.clone();
+                                text.push('\n');
+                                terminal.input(text.into_bytes());
+                            });
+                        });
+                    }
+                }
+
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(interval_ms))
+                    .await;
+            }
+        });
+
+        self.cycle_task = Some(task);
+        cx.notify();
     }
 
     fn clear_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
