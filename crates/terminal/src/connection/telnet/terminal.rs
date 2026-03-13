@@ -188,6 +188,7 @@ fn spawn_channel_task(
         use std::time::{Duration, Instant};
 
         const DEBOUNCE_DELAY: Duration = Duration::from_millis(10);
+        const NAWS_DEBOUNCE_DELAY: Duration = Duration::from_millis(150);
 
         let keepalive_duration = keepalive_interval.unwrap_or(Duration::from_secs(30));
 
@@ -197,11 +198,17 @@ fn spawn_channel_task(
         let mut read_buf = [0u8; 4096];
         let mut sent_initial_naws = false;
         let mut pending_wakeup_deadline: Option<Instant> = None;
+        let mut pending_naws_size: Option<WindowSize> = None;
+        let mut pending_naws_deadline: Option<Instant> = None;
         let mut last_activity = Instant::now();
 
         loop {
+            let now = Instant::now();
             let timeout_duration = pending_wakeup_deadline
-                .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                .map(|deadline| deadline.saturating_duration_since(now))
+                .unwrap_or(Duration::MAX);
+            let naws_timeout = pending_naws_deadline
+                .map(|deadline| deadline.saturating_duration_since(now))
                 .unwrap_or(Duration::MAX);
 
             let time_since_activity = last_activity.elapsed();
@@ -217,6 +224,24 @@ fn spawn_channel_task(
                 _ = tokio::time::sleep(timeout_duration), if pending_wakeup_deadline.is_some() => {
                     event_tx.unbounded_send(AlacTermEvent::Wakeup).ok();
                     pending_wakeup_deadline = None;
+                }
+                _ = tokio::time::sleep(naws_timeout), if pending_naws_deadline.is_some() => {
+                    if let Some(size) = pending_naws_size.take() {
+                        let naws_packet = negotiator.build_naws(size);
+                        if !naws_packet.is_empty() {
+                            stats.naws_count.fetch_add(1, Ordering::Relaxed);
+                            log::debug!(
+                                "[TELNET] NAWS: {}x{} to {}",
+                                size.num_cols,
+                                size.num_lines,
+                                stats.target_addr
+                            );
+                            if let Err(error) = write_half.write_all(&naws_packet).await {
+                                log::warn!("[TELNET] Failed to send NAWS to {}: {}", stats.target_addr, error);
+                            }
+                        }
+                    }
+                    pending_naws_deadline = None;
                 }
                 _ = tokio::time::sleep(keepalive_timeout), if keepalive_interval.is_some() => {
                     if let Err(error) = write_half.write_all(&[IAC, NOP]).await {
@@ -248,20 +273,8 @@ fn spawn_channel_task(
                             last_activity = Instant::now();
                         }
                         Some(TelnetChannelCommand::Resize(size)) => {
-                            let naws_packet = negotiator.build_naws(size);
-                            if !naws_packet.is_empty() {
-                                stats.naws_count.fetch_add(1, Ordering::Relaxed);
-                                log::debug!(
-                                    "[TELNET] NAWS: {}x{} to {}",
-                                    size.num_cols,
-                                    size.num_lines,
-                                    stats.target_addr
-                                );
-                                if let Err(error) = write_half.write_all(&naws_packet).await {
-                                    log::warn!("[TELNET] Failed to send NAWS to {}: {}", stats.target_addr, error);
-                                }
-                            }
-                            last_activity = Instant::now();
+                            pending_naws_size = Some(size);
+                            pending_naws_deadline = Some(Instant::now() + NAWS_DEBOUNCE_DELAY);
                         }
                         Some(TelnetChannelCommand::Close) | None => {
                             stats.log_disconnect("user closed");
