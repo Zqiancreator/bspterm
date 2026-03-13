@@ -1,5 +1,10 @@
-use chrono::{DateTime, Local};
+use std::path::Path;
+
+use anyhow::Result;
+use chrono::{DateTime, Local, Utc};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global, Task};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 /// A command extracted from terminal output.
@@ -122,6 +127,287 @@ fn extract_command(line: &str) -> Option<(String, String)> {
     }
 
     None
+}
+
+// ── PromptContext classification ─────────────────────────────────────────
+
+/// Classifies the type of prompt to scope autosuggestion matching.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PromptContext {
+    UnixShell,
+    HuaweiUserView,
+    HuaweiSystemView { sub_view: Option<String> },
+    CiscoConfig { mode: String },
+    Unknown,
+}
+
+/// Classifies a prompt string into a PromptContext.
+pub fn classify_prompt(prompt: &str) -> PromptContext {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return PromptContext::Unknown;
+    }
+
+    // <DeviceName> → HuaweiUserView
+    if trimmed.starts_with('<') && trimmed.ends_with('>') {
+        return PromptContext::HuaweiUserView;
+    }
+
+    // [DeviceName] or [DeviceName-xxx] → HuaweiSystemView
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        let sub_view = if let Some(pos) = inner.find('-') {
+            let raw = &inner[pos + 1..];
+            Some(normalize_sub_view(raw))
+        } else {
+            None
+        };
+        return PromptContext::HuaweiSystemView { sub_view };
+    }
+
+    // hostname(config)# or hostname(config-if)> → CiscoConfig
+    if let Some(paren_start) = trimmed.rfind('(') {
+        if let Some(paren_end) = trimmed[paren_start..].find(')') {
+            let after_paren = &trimmed[paren_start + paren_end + 1..];
+            if after_paren == "#" || after_paren == ">" {
+                let mode = trimmed[paren_start + 1..paren_start + paren_end].to_string();
+                return PromptContext::CiscoConfig { mode };
+            }
+        }
+    }
+
+    // Ends with $ or # or > → UnixShell
+    if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('>') {
+        return PromptContext::UnixShell;
+    }
+
+    PromptContext::Unknown
+}
+
+/// Normalizes a Huawei sub-view name by stripping trailing digits and separators.
+/// e.g., "GigabitEthernet0/0/1" → "GigabitEthernet", "Vlanif10" → "Vlanif"
+pub fn normalize_sub_view(raw: &str) -> String {
+    let trimmed = raw.trim_end_matches(|c: char| c.is_ascii_digit() || c == '/' || c == '.');
+    if trimmed.is_empty() {
+        raw.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+// ── GlobalCommandPool ──────────────────────────────────────────────────
+
+/// A command stored with its prompt context for scoped autosuggestion.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContextualCommand {
+    pub context: PromptContext,
+    pub command: String,
+    /// Unix timestamp of when this command was last used.
+    /// `None` for entries saved before this field existed (backward compat).
+    #[serde(default)]
+    pub last_used: Option<i64>,
+}
+
+fn default_max_commands() -> usize {
+    10_000
+}
+
+/// Global pool of commands from all terminal instances, persisted to disk.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GlobalCommandPool {
+    commands: Vec<ContextualCommand>,
+    #[serde(skip, default = "default_max_commands")]
+    max_commands: usize,
+}
+
+impl Default for GlobalCommandPool {
+    fn default() -> Self {
+        Self {
+            commands: Vec::new(),
+            max_commands: default_max_commands(),
+        }
+    }
+}
+
+impl GlobalCommandPool {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a command to the pool. Deduplicates by (context, command) — moves existing to front.
+    pub fn add_command(&mut self, command: String, context: PromptContext) {
+        if command.is_empty() {
+            return;
+        }
+        let now = Utc::now().timestamp();
+        // Remove duplicate if exists
+        self.commands
+            .retain(|entry| !(entry.context == context && entry.command == command));
+        // Insert at front (most recent first)
+        self.commands.insert(
+            0,
+            ContextualCommand {
+                context,
+                command,
+                last_used: Some(now),
+            },
+        );
+        // Enforce max limit
+        if self.commands.len() > self.max_commands {
+            self.commands.truncate(self.max_commands);
+        }
+    }
+
+    /// Find a suggestion for a prefix within the same prompt context.
+    /// Returns the full command (caller can derive the suffix).
+    pub fn find_suggestion(&self, prefix: &str, context: &PromptContext) -> Option<&str> {
+        if prefix.is_empty() {
+            return None;
+        }
+        self.commands
+            .iter()
+            .find(|entry| entry.context == *context && entry.command.starts_with(prefix) && entry.command != prefix)
+            .map(|entry| entry.command.as_str())
+    }
+
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let mut pool: Self = serde_json::from_str(&content)?;
+        pool.max_commands = default_max_commands();
+        Ok(pool)
+    }
+
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+
+    /// Remove commands older than `max_age_days`.
+    /// Entries with `last_used == None` (pre-upgrade) get stamped with `now` to survive one cycle.
+    pub fn purge_expired(&mut self, max_age_days: u64) {
+        let now = Utc::now().timestamp();
+        let cutoff = now - (max_age_days as i64) * 86400;
+
+        // Backfill legacy entries that have no timestamp
+        for entry in &mut self.commands {
+            if entry.last_used.is_none() {
+                entry.last_used = Some(now);
+            }
+        }
+
+        self.commands
+            .retain(|entry| entry.last_used.unwrap_or(now) >= cutoff);
+    }
+
+    pub fn clear(&mut self) {
+        self.commands.clear();
+    }
+
+    pub fn commands(&self) -> &[ContextualCommand] {
+        &self.commands
+    }
+
+    #[cfg(test)]
+    pub fn with_max_commands(mut self, max: usize) -> Self {
+        self.max_commands = max;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn push_raw(&mut self, entry: ContextualCommand) {
+        self.commands.push(entry);
+    }
+}
+
+// ── GPUI Entity wrapper ────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub enum GlobalCommandPoolEvent {
+    Changed,
+}
+
+pub struct GlobalCommandPoolMarker(pub Entity<GlobalCommandPoolEntity>);
+impl Global for GlobalCommandPoolMarker {}
+
+pub struct GlobalCommandPoolEntity {
+    pool: GlobalCommandPool,
+    save_task: Option<Task<()>>,
+}
+
+impl EventEmitter<GlobalCommandPoolEvent> for GlobalCommandPoolEntity {}
+
+impl GlobalCommandPoolEntity {
+    pub fn init(cx: &mut App) {
+        Self::init_with_max_age(cx, None);
+    }
+
+    pub fn init_with_max_age(cx: &mut App, max_age_days: Option<u64>) {
+        if cx.try_global::<GlobalCommandPoolMarker>().is_some() {
+            return;
+        }
+
+        let mut pool = GlobalCommandPool::load_from_file(paths::command_pool_file())
+            .unwrap_or_else(|err| {
+                log::error!("Failed to load command pool: {}", err);
+                GlobalCommandPool::new()
+            });
+
+        let max_age = max_age_days.unwrap_or(7);
+        pool.purge_expired(max_age);
+
+        let entity = cx.new(|_| Self {
+            pool,
+            save_task: None,
+        });
+
+        cx.set_global(GlobalCommandPoolMarker(entity));
+    }
+
+    pub fn global(cx: &App) -> Entity<Self> {
+        cx.global::<GlobalCommandPoolMarker>().0.clone()
+    }
+
+    pub fn try_global(cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<GlobalCommandPoolMarker>()
+            .map(|g| g.0.clone())
+    }
+
+    pub fn add_command(
+        &mut self,
+        command: String,
+        context: PromptContext,
+        cx: &mut Context<Self>,
+    ) {
+        self.pool.add_command(command, context);
+        self.schedule_save(cx);
+    }
+
+    pub fn find_suggestion(&self, prefix: &str, context: &PromptContext) -> Option<&str> {
+        self.pool.find_suggestion(prefix, context)
+    }
+
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.pool.clear();
+        self.schedule_save(cx);
+        cx.emit(GlobalCommandPoolEvent::Changed);
+    }
+
+    pub fn pool_len(&self) -> usize {
+        self.pool.commands().len()
+    }
+
+    fn schedule_save(&mut self, cx: &mut Context<Self>) {
+        let pool = self.pool.clone();
+        self.save_task = Some(cx.spawn(async move |_, _| {
+            if let Err(err) = pool.save_to_file(paths::command_pool_file()) {
+                log::error!("Failed to save command pool: {}", err);
+            }
+        }));
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +556,204 @@ mod tests {
 
         assert_eq!(history.commands().len(), 2);
         assert_eq!(history.commands()[0].command_text, "cmd2");
+    }
+
+    // ── PromptContext tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_classify_prompt() {
+        // Unix shell prompts
+        assert_eq!(classify_prompt("user@host:~$"), PromptContext::UnixShell);
+        assert_eq!(classify_prompt("root#"), PromptContext::UnixShell);
+        assert_eq!(classify_prompt("/ #"), PromptContext::UnixShell);
+        assert_eq!(classify_prompt("~ $"), PromptContext::UnixShell);
+
+        // Huawei user view
+        assert_eq!(classify_prompt("<Huawei>"), PromptContext::HuaweiUserView);
+        assert_eq!(classify_prompt("<R1>"), PromptContext::HuaweiUserView);
+
+        // Huawei system view
+        assert_eq!(
+            classify_prompt("[Huawei]"),
+            PromptContext::HuaweiSystemView { sub_view: None }
+        );
+        assert_eq!(
+            classify_prompt("[Huawei-GigabitEthernet0/0/1]"),
+            PromptContext::HuaweiSystemView {
+                sub_view: Some("GigabitEthernet".to_string())
+            }
+        );
+        assert_eq!(
+            classify_prompt("[Huawei-Vlanif10]"),
+            PromptContext::HuaweiSystemView {
+                sub_view: Some("Vlanif".to_string())
+            }
+        );
+
+        // Cisco config
+        assert_eq!(
+            classify_prompt("Router(config)#"),
+            PromptContext::CiscoConfig {
+                mode: "config".to_string()
+            }
+        );
+        assert_eq!(
+            classify_prompt("Router(config-if)#"),
+            PromptContext::CiscoConfig {
+                mode: "config-if".to_string()
+            }
+        );
+
+        // Unknown
+        assert_eq!(classify_prompt(""), PromptContext::Unknown);
+        assert_eq!(classify_prompt("something"), PromptContext::Unknown);
+    }
+
+    #[test]
+    fn test_normalize_sub_view() {
+        assert_eq!(normalize_sub_view("GigabitEthernet0/0/1"), "GigabitEthernet");
+        assert_eq!(normalize_sub_view("Vlanif10"), "Vlanif");
+        assert_eq!(normalize_sub_view("aaa"), "aaa");
+        assert_eq!(normalize_sub_view("LoopBack0"), "LoopBack");
+        // Edge case: all digits
+        assert_eq!(normalize_sub_view("123"), "123");
+    }
+
+    #[test]
+    fn test_contextual_suggestion() {
+        let mut pool = GlobalCommandPool::new();
+        pool.add_command("display version".to_string(), PromptContext::HuaweiUserView);
+        pool.add_command("display ip routing-table".to_string(), PromptContext::HuaweiUserView);
+        pool.add_command("ls -la".to_string(), PromptContext::UnixShell);
+
+        // Same context → returns match
+        assert_eq!(
+            pool.find_suggestion("disp", &PromptContext::HuaweiUserView),
+            Some("display ip routing-table")
+        );
+
+        // Different context → no match
+        assert_eq!(
+            pool.find_suggestion("disp", &PromptContext::UnixShell),
+            None
+        );
+
+        // Exact match → no suggestion (need something longer)
+        assert_eq!(
+            pool.find_suggestion("ls -la", &PromptContext::UnixShell),
+            None
+        );
+
+        // Empty prefix → no suggestion
+        assert_eq!(
+            pool.find_suggestion("", &PromptContext::UnixShell),
+            None
+        );
+    }
+
+    #[test]
+    fn test_recency_ordering() {
+        let mut pool = GlobalCommandPool::new();
+        pool.add_command("display version".to_string(), PromptContext::HuaweiUserView);
+        pool.add_command("display ip routing-table".to_string(), PromptContext::HuaweiUserView);
+
+        // Most recent match first
+        assert_eq!(
+            pool.find_suggestion("display", &PromptContext::HuaweiUserView),
+            Some("display ip routing-table")
+        );
+
+        // Re-add "display version" to move it to front
+        pool.add_command("display version".to_string(), PromptContext::HuaweiUserView);
+        assert_eq!(
+            pool.find_suggestion("display", &PromptContext::HuaweiUserView),
+            Some("display version")
+        );
+    }
+
+    #[test]
+    fn test_deduplication() {
+        let mut pool = GlobalCommandPool::new();
+        pool.add_command("ls -la".to_string(), PromptContext::UnixShell);
+        pool.add_command("pwd".to_string(), PromptContext::UnixShell);
+        pool.add_command("ls -la".to_string(), PromptContext::UnixShell);
+
+        // Should have only 2 commands (deduplicated)
+        assert_eq!(pool.commands().len(), 2);
+        // "ls -la" should be at front (most recent)
+        assert_eq!(pool.commands()[0].command, "ls -la");
+        assert_eq!(pool.commands()[1].command, "pwd");
+    }
+
+    #[test]
+    fn test_max_limit() {
+        let mut pool = GlobalCommandPool::new().with_max_commands(3);
+        pool.add_command("cmd1".to_string(), PromptContext::UnixShell);
+        pool.add_command("cmd2".to_string(), PromptContext::UnixShell);
+        pool.add_command("cmd3".to_string(), PromptContext::UnixShell);
+        pool.add_command("cmd4".to_string(), PromptContext::UnixShell);
+
+        assert_eq!(pool.commands().len(), 3);
+        // Oldest (cmd1) should be evicted
+        assert_eq!(pool.commands()[0].command, "cmd4");
+        assert_eq!(pool.commands()[1].command, "cmd3");
+        assert_eq!(pool.commands()[2].command, "cmd2");
+    }
+
+    #[test]
+    fn test_add_command_sets_timestamp() {
+        let mut pool = GlobalCommandPool::new();
+        pool.add_command("ls -la".to_string(), PromptContext::UnixShell);
+
+        let entry = &pool.commands()[0];
+        assert!(entry.last_used.is_some());
+        let now = Utc::now().timestamp();
+        // Timestamp should be within 2 seconds of now
+        assert!((now - entry.last_used.unwrap()).abs() < 2);
+    }
+
+    #[test]
+    fn test_purge_expired_commands() {
+        let mut pool = GlobalCommandPool::new();
+        let now = Utc::now().timestamp();
+
+        // Add a fresh command via add_command (gets current timestamp)
+        pool.add_command("fresh".to_string(), PromptContext::UnixShell);
+
+        // Manually insert an old command (8 days ago)
+        pool.push_raw(ContextualCommand {
+            context: PromptContext::UnixShell,
+            command: "old_cmd".to_string(),
+            last_used: Some(now - 8 * 86400),
+        });
+
+        // Manually insert a command with no timestamp (legacy)
+        pool.push_raw(ContextualCommand {
+            context: PromptContext::UnixShell,
+            command: "legacy_cmd".to_string(),
+            last_used: None,
+        });
+
+        assert_eq!(pool.commands().len(), 3);
+
+        pool.purge_expired(7);
+
+        // "fresh" survives, "legacy_cmd" gets backfilled and survives, "old_cmd" is purged
+        assert_eq!(pool.commands().len(), 2);
+        assert_eq!(pool.commands()[0].command, "fresh");
+        assert_eq!(pool.commands()[1].command, "legacy_cmd");
+        // Legacy entry should now have a timestamp
+        assert!(pool.commands()[1].last_used.is_some());
+    }
+
+    #[test]
+    fn test_clear_pool() {
+        let mut pool = GlobalCommandPool::new();
+        pool.add_command("cmd1".to_string(), PromptContext::UnixShell);
+        pool.add_command("cmd2".to_string(), PromptContext::UnixShell);
+        assert_eq!(pool.commands().len(), 2);
+
+        pool.clear();
+        assert_eq!(pool.commands().len(), 0);
     }
 }

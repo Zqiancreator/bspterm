@@ -241,6 +241,20 @@ pub struct TerminalSettingsContent {
     ///
     /// Default: true
     pub group_tabs_by_session: Option<bool>,
+    /// Enable fish-like autosuggestion in the terminal.
+    /// Shows ghost text based on command history matching the current prompt context.
+    /// 在终端中启用类似 fish 的自动建议功能。
+    /// 根据当前 prompt 上下文的命令历史显示灰色幽灵文本。
+    ///
+    /// Default: true
+    pub autosuggestion: Option<bool>,
+    /// Maximum age in days for autosuggestion command history entries.
+    /// Commands not used within this period are automatically purged.
+    /// 自动建议命令历史条目的最大保留天数。
+    /// 超过此天数未使用的命令将被自动清除。
+    ///
+    /// Default: 7
+    pub autosuggestion_max_age_days: Option<u64>,
 }
 
 /// Shell configuration to open the terminal with.

@@ -109,6 +109,8 @@ pub struct TerminalSettings {
     pub ssh_keepalive_interval_secs: u64,
     pub ssh_keepalive_max: usize,
     pub group_tabs_by_session: bool,
+    pub autosuggestion: bool,
+    pub autosuggestion_max_age_days: u64,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -236,6 +238,8 @@ impl settings::Settings for TerminalSettings {
             ssh_keepalive_interval_secs: user_content.ssh_keepalive_interval_secs.unwrap_or(5),
             ssh_keepalive_max: user_content.ssh_keepalive_max.unwrap_or(2),
             group_tabs_by_session: user_content.group_tabs_by_session.unwrap_or(true),
+            autosuggestion: user_content.autosuggestion.unwrap_or(true),
+            autosuggestion_max_age_days: user_content.autosuggestion_max_age_days.unwrap_or(7),
         }
     }
 }

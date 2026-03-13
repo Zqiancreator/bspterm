@@ -103,7 +103,7 @@ use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     get_action_label, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
     ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol, FunctionStoreEntity,
-    ShortcutBarStoreEntity, ShortcutBarStoreEvent, ALL_SYSTEM_ACTIONS,
+    GlobalCommandPoolEntity, ShortcutBarStoreEntity, ShortcutBarStoreEvent, ALL_SYSTEM_ACTIONS,
 };
 use shortcut_bar::get_keybindings_for_action;
 use terminal_scripting::{ScriptingServer, TerminalRegistry};
@@ -215,6 +215,8 @@ actions!(
         DeleteButtonBarButton,
         /// Exports all terminal output to a new buffer.
         ExportOutputToBuffer,
+        /// Clears the autosuggestion command history pool.
+        ClearAutosuggestionHistory,
     ]
 );
 
@@ -231,6 +233,8 @@ pub fn init(cx: &mut App) {
     FunctionStoreEntity::init(cx);
     ShortcutBarStoreEntity::init(cx);
     HighlightStoreEntity::init(cx);
+    let max_age_days = TerminalSettings::get_global(cx).autosuggestion_max_age_days;
+    GlobalCommandPoolEntity::init_with_max_age(cx, Some(max_age_days));
     KeystrokeRecordingState::init(cx);
 
     fn ensure_session_log_directory(cx: &App) {
@@ -2892,6 +2896,20 @@ print(output)
         cx.notify();
     }
 
+    fn clear_autosuggestion_history(
+        &mut self,
+        _: &ClearAutosuggestionHistory,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
+            pool_entity.update(cx, |pool, cx| pool.clear(cx));
+        }
+        self.terminal
+            .update(cx, |terminal, _| terminal.clear_autosuggestion());
+        cx.notify();
+    }
+
     fn clear_scrollback(&mut self, _: &ClearScrollback, _: &mut Window, cx: &mut Context<Self>) {
         self.scroll_top = px(0.);
         self.terminal.update(cx, |term, _| term.clear_scrollback());
@@ -4180,6 +4198,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::configure_shortcut_bar))
             .on_action(cx.listener(Self::run_script_shortcut))
             .on_action(cx.listener(Self::trace_call_graph))
+            .on_action(cx.listener(Self::clear_autosuggestion_history))
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(
                 MouseButton::Right,

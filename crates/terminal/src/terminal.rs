@@ -56,7 +56,11 @@ pub use active_session_tracker::{
     GlobalActiveSessionTracker, SessionProtocolType,
 };
 
-pub use command_history::{CommandHistory, TerminalCommand};
+pub use command_history::{
+    CommandHistory, ContextualCommand, GlobalCommandPool, GlobalCommandPoolEntity,
+    GlobalCommandPoolEvent, GlobalCommandPoolMarker, PromptContext, TerminalCommand,
+    classify_prompt, normalize_sub_view,
+};
 
 pub use session_logger::{SessionLogger, SessionMetadata};
 
@@ -547,6 +551,7 @@ impl TerminalBuilder {
             session_logger: None,
             last_user_input_time: None,
             reconnected_while_unfocused: false,
+            autosuggestion: None,
         };
 
         Ok(TerminalBuilder {
@@ -799,6 +804,7 @@ impl TerminalBuilder {
                 session_logger: None,
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
+                autosuggestion: None,
             };
 
             if !activation_script.is_empty() && no_task {
@@ -1020,6 +1026,7 @@ impl TerminalBuilder {
                 session_logger: None,
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
+                autosuggestion: None,
             };
 
             terminal.init_rule_engine();
@@ -1208,6 +1215,7 @@ impl TerminalBuilder {
                 session_logger: None,
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
+                autosuggestion: None,
             };
 
             terminal.init_rule_engine();
@@ -1391,6 +1399,7 @@ impl TerminalBuilder {
             session_logger: None,
             last_user_input_time: None,
             reconnected_while_unfocused: false,
+            autosuggestion: None,
         };
 
         terminal.init_rule_engine();
@@ -1599,6 +1608,8 @@ pub struct Terminal {
     /// Flag set when terminal auto-reconnected while window was unfocused.
     /// Used to show visual indicator on the tab.
     reconnected_while_unfocused: bool,
+    /// Current autosuggestion suffix (ghost text shown after cursor).
+    autosuggestion: Option<String>,
 }
 
 struct CopyTemplate {
@@ -2450,6 +2461,72 @@ impl Terminal {
             return true;
         }
 
+        // Intercept Right/Ctrl+Right for autosuggestion acceptance (before escape sequence handling)
+        if self.autosuggestion.is_some()
+            && !self.last_content.mode.contains(TermMode::ALT_SCREEN)
+        {
+            if keystroke.key.as_str() == "right" && keystroke.modifiers == Modifiers::none() {
+                self.accept_full_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            if keystroke.key.as_str() == "right"
+                && keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.shift
+            {
+                self.accept_word_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            // Ctrl+F → accept full (fish forward-char)
+            if keystroke.key.as_str() == "f"
+                && keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.shift
+            {
+                self.accept_full_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            // Ctrl+E → accept full (fish end-of-line)
+            if keystroke.key.as_str() == "e"
+                && keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.shift
+            {
+                self.accept_full_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            // End → accept full (fish end-of-line)
+            if keystroke.key.as_str() == "end" && keystroke.modifiers == Modifiers::none() {
+                self.accept_full_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            // Alt+F → accept word (fish forward-word)
+            if keystroke.key.as_str() == "f"
+                && keystroke.modifiers.alt
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.shift
+            {
+                self.accept_word_autosuggestion();
+                cx.notify();
+                return true;
+            }
+            // Alt+Right → accept word (fish forward-word)
+            if keystroke.key.as_str() == "right"
+                && keystroke.modifiers.alt
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.shift
+            {
+                self.accept_word_autosuggestion();
+                cx.notify();
+                return true;
+            }
+        }
+
         // Try to_esc_str first, fallback to key_char for regular characters
         let esc = to_esc_str(keystroke, &self.last_content.mode, option_as_meta);
         let input_str: Option<Cow<'_, str>> = esc.or_else(|| {
@@ -2461,6 +2538,17 @@ impl Terminal {
 
             // Check if this is Enter key
             let is_enter = input_bytes.iter().any(|&b| b == b'\r' || b == b'\n');
+
+            // For Enter, record command to global pool BEFORE buffers get cleared
+            if is_enter && !self.current_line_buffer.trim().is_empty() {
+                let command = self.current_line_buffer.trim().to_string();
+                let context = self.detect_prompt_context();
+                if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
+                    pool_entity.update(cx, |pool, cx| {
+                        pool.add_command(command, context, cx);
+                    });
+                }
+            }
 
             // For Enter, check function invocation FIRST (higher priority than abbreviation)
             if is_enter {
@@ -2480,6 +2568,7 @@ impl Terminal {
                     // Clear buffers
                     self.current_word_buffer.clear();
                     self.current_line_buffer.clear();
+                    self.autosuggestion = None;
                     // Emit the function invoked event
                     cx.emit(Event::FunctionInvoked(invocation));
                     return true;
@@ -2491,21 +2580,88 @@ impl Terminal {
                 if let Some(expansion) = self.try_expand_abbreviation_for_enter(cx) {
                     self.apply_expansion_for_enter(&expansion);
                     self.input(input_bytes.to_vec());
+                    self.autosuggestion = None;
                     return true;
                 }
             }
 
-            self.update_input_buffers(input_bytes);
+            let is_backward_kill_word = keystroke.key.as_str() == "backspace"
+                && keystroke.modifiers.alt
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.shift;
+            let is_unix_word_rubout = keystroke.key.as_str() == "w"
+                && keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.shift;
+            let is_kill_line = keystroke.key.as_str() == "u"
+                && keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.shift;
+            let is_navigation_key = matches!(
+                keystroke.key.as_str(),
+                "left"
+                    | "right"
+                    | "up"
+                    | "down"
+                    | "home"
+                    | "end"
+                    | "pageup"
+                    | "pagedown"
+                    | "insert"
+                    | "delete"
+                    | "f1"
+                    | "f2"
+                    | "f3"
+                    | "f4"
+                    | "f5"
+                    | "f6"
+                    | "f7"
+                    | "f8"
+                    | "f9"
+                    | "f10"
+                    | "f11"
+                    | "f12"
+                    | "f13"
+                    | "f14"
+                    | "f15"
+                    | "f16"
+                    | "f17"
+                    | "f18"
+                    | "f19"
+                    | "f20"
+            );
+
+            if is_backward_kill_word {
+                self.delete_readline_word_from_buffers();
+            } else if is_unix_word_rubout {
+                self.delete_backward_word_from_buffers();
+            } else if is_kill_line {
+                self.current_word_buffer.clear();
+                self.current_line_buffer.clear();
+            } else if is_navigation_key {
+                // Navigation keys produce escape sequences (e.g. \x1b[D for Left Arrow).
+                // Don't pass these through update_input_buffers() as the bytes after ESC
+                // are in printable ASCII range and would corrupt the buffers.
+                if matches!(keystroke.key.as_str(), "up" | "down") {
+                    self.current_word_buffer.clear();
+                    self.current_line_buffer.clear();
+                }
+                self.autosuggestion = None;
+            } else {
+                self.update_input_buffers(input_bytes);
+            }
 
             // For space, check abbreviation AFTER updating buffers
             if abbr_enabled && !is_enter {
                 if let Some(expansion) = self.try_expand_abbreviation(cx) {
                     self.apply_expansion(&expansion);
+                    self.update_autosuggestion(cx);
                     return true;
                 }
             }
 
             self.input(input_bytes.to_vec());
+            self.update_autosuggestion(cx);
             log::debug!("terminal_key: try_keystroke sent to input, key={:?}", keystroke);
             true
         } else {
@@ -2514,48 +2670,126 @@ impl Terminal {
         }
     }
 
+    fn delete_backward_word_from_buffers(&mut self) {
+        let bytes = self.current_line_buffer.as_bytes();
+        let mut pos = bytes.len();
+
+        // Skip trailing whitespace
+        while pos > 0 && bytes[pos - 1] == b' ' {
+            pos -= 1;
+        }
+        // Skip non-whitespace (the word)
+        while pos > 0 && bytes[pos - 1] != b' ' {
+            pos -= 1;
+        }
+
+        let deleted_count = self.current_line_buffer.len() - pos;
+        self.current_line_buffer.truncate(pos);
+
+        for _ in 0..deleted_count {
+            self.current_word_buffer.pop();
+        }
+    }
+
+    fn delete_readline_word_from_buffers(&mut self) {
+        fn is_readline_word_char(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || byte == b'_'
+        }
+
+        let bytes = self.current_line_buffer.as_bytes();
+        let mut pos = bytes.len();
+
+        // Skip backward over non-word chars (space, `-`, `/`, `.`, etc.)
+        while pos > 0 && !is_readline_word_char(bytes[pos - 1]) {
+            pos -= 1;
+        }
+        // Skip backward over word chars (alphanumeric + underscore)
+        while pos > 0 && is_readline_word_char(bytes[pos - 1]) {
+            pos -= 1;
+        }
+
+        let deleted_count = self.current_line_buffer.len() - pos;
+        self.current_line_buffer.truncate(pos);
+
+        for _ in 0..deleted_count {
+            self.current_word_buffer.pop();
+        }
+    }
+
     fn update_input_buffers(&mut self, input: &[u8]) {
+        // State machine to skip escape sequences whose trailing bytes fall in
+        // printable ASCII range and would otherwise corrupt the buffers.
+        enum EscapeState {
+            Normal,
+            Escape,
+            Csi,
+            Ss3,
+        }
+
+        let mut escape_state = EscapeState::Normal;
         for &byte in input {
-            match byte {
-                // Space - triggers abbreviation check (handled separately)
-                b' ' => {
-                    self.current_word_buffer.push(' ');
-                    self.current_line_buffer.push(' ');
-                }
-                // Enter/Return - resets line buffer
-                b'\r' | b'\n' => {
-                    self.current_word_buffer.clear();
-                    self.current_line_buffer.clear();
-                }
-                // Backspace - remove last char from buffers
-                0x7f | 0x08 => {
-                    self.current_word_buffer.pop();
-                    if let Some(c) = self.current_line_buffer.pop() {
-                        if c == ' ' && !self.current_word_buffer.is_empty() {
-                            self.current_word_buffer.clear();
+            match escape_state {
+                EscapeState::Normal => match byte {
+                    // ESC — start of an escape sequence
+                    0x1b => {
+                        escape_state = EscapeState::Escape;
+                    }
+                    // Space - triggers abbreviation check (handled separately)
+                    b' ' => {
+                        self.current_word_buffer.push(' ');
+                        self.current_line_buffer.push(' ');
+                    }
+                    // Enter/Return - resets line buffer
+                    b'\r' | b'\n' => {
+                        self.current_word_buffer.clear();
+                        self.current_line_buffer.clear();
+                    }
+                    // Backspace - remove last char from buffers
+                    0x7f | 0x08 => {
+                        self.current_word_buffer.pop();
+                        if let Some(c) = self.current_line_buffer.pop() {
+                            if c == ' ' && !self.current_word_buffer.is_empty() {
+                                self.current_word_buffer.clear();
+                            }
                         }
                     }
+                    // Ctrl+C, Ctrl+D, etc. - clear buffers
+                    0x03 | 0x04 => {
+                        self.current_word_buffer.clear();
+                        self.current_line_buffer.clear();
+                    }
+                    // Tab - clear word buffer
+                    b'\t' => {
+                        self.current_word_buffer.clear();
+                        self.current_line_buffer.push('\t');
+                    }
+                    // Printable ASCII characters
+                    byte if byte >= 0x20 && byte < 0x7f => {
+                        let c = byte as char;
+                        self.current_word_buffer.push(c);
+                        self.current_line_buffer.push(c);
+                    }
+                    // Other characters
+                    _ => {}
+                },
+                EscapeState::Escape => match byte {
+                    b'[' => escape_state = EscapeState::Csi,
+                    b'O' => escape_state = EscapeState::Ss3,
+                    // Single-char escape (e.g. ESC + letter for Alt): consume and return to Normal
+                    _ => escape_state = EscapeState::Normal,
+                },
+                EscapeState::Csi => {
+                    // CSI params: 0x30-0x3F, intermediates: 0x20-0x2F
+                    // Final byte: 0x40-0x7E — consume it and return to Normal
+                    if (0x40..=0x7E).contains(&byte) {
+                        escape_state = EscapeState::Normal;
+                    }
+                    // else: still in CSI sequence, skip parameter/intermediate bytes
                 }
-                // Ctrl+C, Ctrl+D, etc. - clear buffers
-                0x03 | 0x04 => {
-                    self.current_word_buffer.clear();
-                    self.current_line_buffer.clear();
+                EscapeState::Ss3 => {
+                    // SS3 final byte follows immediately
+                    escape_state = EscapeState::Normal;
                 }
-                // Tab - clear word buffer
-                b'\t' => {
-                    self.current_word_buffer.clear();
-                    self.current_line_buffer.push('\t');
-                }
-                // Printable ASCII characters
-                byte if byte >= 0x20 && byte < 0x7f => {
-                    let c = byte as char;
-                    self.current_word_buffer.push(c);
-                    self.current_line_buffer.push(c);
-                }
-                // Escape sequences start - don't add to buffers
-                0x1b => {}
-                // Other characters
-                _ => {}
             }
         }
     }
@@ -2838,6 +3072,113 @@ impl Terminal {
     pub fn clear_input_buffers(&mut self) {
         self.current_word_buffer.clear();
         self.current_line_buffer.clear();
+        self.autosuggestion = None;
+    }
+
+    /// Returns the current autosuggestion suffix (the text after what user has typed).
+    pub fn autosuggestion(&self) -> Option<&str> {
+        self.autosuggestion.as_deref()
+    }
+
+    /// Clears the current autosuggestion.
+    pub fn clear_autosuggestion(&mut self) {
+        self.autosuggestion = None;
+    }
+
+    /// Detects the prompt context from the current terminal line.
+    /// Reads the cursor line from the term grid and strips the user input to extract the prompt.
+    pub fn detect_prompt_context(&self) -> PromptContext {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let cursor_line = grid.cursor.point.line;
+
+        let mut line_text = String::new();
+        let row = &grid[cursor_line];
+        for col in 0..grid.columns() {
+            let cell = &row[Column(col)];
+            let c = cell.c;
+            if c != ' ' || !line_text.is_empty() || col < grid.columns() - 1 {
+                line_text.push(c);
+            }
+        }
+        let line_text = line_text.trim_end().to_string();
+        drop(term);
+
+        // Strip user input from the end to get the prompt
+        let prompt = if !self.current_line_buffer.is_empty() {
+            if let Some(stripped) = line_text.strip_suffix(&self.current_line_buffer) {
+                stripped.trim_end()
+            } else {
+                line_text.as_str()
+            }
+        } else {
+            line_text.as_str()
+        };
+
+        classify_prompt(prompt)
+    }
+
+    /// Updates the autosuggestion by querying the global command pool.
+    pub fn update_autosuggestion(&mut self, cx: &App) {
+        if self.current_line_buffer.is_empty() {
+            self.autosuggestion = None;
+            return;
+        }
+
+        if self.last_content.mode.contains(TermMode::ALT_SCREEN) {
+            self.autosuggestion = None;
+            return;
+        }
+
+        let context = self.detect_prompt_context();
+        if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
+            let pool = pool_entity.read(cx);
+            if let Some(full_command) = pool.find_suggestion(&self.current_line_buffer, &context) {
+                let suffix = &full_command[self.current_line_buffer.len()..];
+                self.autosuggestion = Some(suffix.to_string());
+            } else {
+                self.autosuggestion = None;
+            }
+        } else {
+            self.autosuggestion = None;
+        }
+    }
+
+    /// Accepts the full autosuggestion — sends the suffix text to the terminal.
+    pub fn accept_full_autosuggestion(&mut self) {
+        if let Some(suggestion) = self.autosuggestion.take() {
+            self.update_input_buffers(suggestion.as_bytes());
+            self.input(suggestion.into_bytes());
+        }
+    }
+
+    /// Accepts the next word from the autosuggestion.
+    pub fn accept_word_autosuggestion(&mut self) {
+        if let Some(suggestion) = self.autosuggestion.take() {
+            // Find the end of the next word (skip leading spaces, then find next space)
+            let trimmed = suggestion.as_str();
+            let word_end = trimmed
+                .find(|c: char| c.is_whitespace())
+                .map(|pos| {
+                    // Include the space after the word
+                    pos + trimmed[pos..]
+                        .find(|c: char| !c.is_whitespace())
+                        .unwrap_or(trimmed.len() - pos)
+                })
+                .unwrap_or(trimmed.len());
+
+            let word = &trimmed[..word_end];
+            let remaining = &trimmed[word_end..];
+
+            self.update_input_buffers(word.as_bytes());
+            self.input(word.as_bytes().to_vec());
+
+            if remaining.is_empty() {
+                self.autosuggestion = None;
+            } else {
+                self.autosuggestion = Some(remaining.to_string());
+            }
+        }
     }
 
     pub fn try_modifiers_change(
@@ -5618,6 +5959,134 @@ mod tests {
                 term.paste_line("line2", false);
                 // first_line=false does not clear buffers before appending
                 // but \r at end clears them again
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+    }
+
+    mod backward_kill_word_tests {
+        use super::super::*;
+        use gpui::{Entity, TestAppContext};
+
+        fn build_display_only_terminal(cx: &mut TestAppContext) -> Entity<Terminal> {
+            cx.update(|cx| {
+                let settings_store = settings::SettingsStore::test(cx);
+                cx.set_global(settings_store);
+            });
+
+            let window = cx.add_empty_window();
+            let builder = window.update(|_window, cx| {
+                TerminalBuilder::new_display_only(
+                    CursorShape::default(),
+                    AlternateScroll::On,
+                    None,
+                    0,
+                    cx.background_executor(),
+                    PathStyle::local(),
+                )
+                .unwrap()
+            });
+            window.new(|cx| builder.subscribe(cx))
+        }
+
+        #[gpui::test]
+        async fn test_delete_backward_word_single_word(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"ls");
+                assert_eq!(term.current_line_buffer, "ls");
+
+                term.delete_backward_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_backward_word_multiple_words(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"ls -la");
+                assert_eq!(term.current_line_buffer, "ls -la");
+
+                term.delete_backward_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "ls ");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_backward_word_empty_buffer(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                assert_eq!(term.current_line_buffer, "");
+
+                term.delete_backward_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_readline_word_with_dash(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"ls -la");
+                assert_eq!(term.current_line_buffer, "ls -la");
+
+                term.delete_readline_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "ls -");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_readline_word_path(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"cd /home/user");
+                assert_eq!(term.current_line_buffer, "cd /home/user");
+
+                term.delete_readline_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "cd /home/");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_readline_word_single_word(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"hello");
+                assert_eq!(term.current_line_buffer, "hello");
+
+                term.delete_readline_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_delete_readline_word_empty(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                assert_eq!(term.current_line_buffer, "");
+
+                term.delete_readline_word_from_buffers();
+                assert_eq!(term.current_line_buffer, "");
+                assert_eq!(term.current_word_buffer, "");
+            });
+        }
+
+        #[gpui::test]
+        async fn test_ctrl_u_clears_both_buffers(cx: &mut TestAppContext) {
+            let terminal = build_display_only_terminal(cx);
+            terminal.update(cx, |term: &mut Terminal, _cx| {
+                term.update_input_buffers(b"some command");
+                assert_eq!(term.current_line_buffer, "some command");
+                assert!(!term.current_word_buffer.is_empty());
+
+                // Simulate Ctrl+U effect
+                term.current_word_buffer.clear();
+                term.current_line_buffer.clear();
                 assert_eq!(term.current_line_buffer, "");
                 assert_eq!(term.current_word_buffer, "");
             });

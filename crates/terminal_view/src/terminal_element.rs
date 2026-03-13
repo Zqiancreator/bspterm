@@ -98,6 +98,7 @@ pub struct LayoutState {
     block_below_cursor_element: Option<AnyElement>,
     base_text_style: TextStyle,
     content_mode: ContentMode,
+    autosuggestion_run: Option<BatchedTextRun>,
 }
 
 /// Helper struct for converting data between Alacritty's cursor points, and displayed cursor points.
@@ -1894,6 +1895,57 @@ impl Element for TerminalElement {
                     None
                 };
 
+                // Compute autosuggestion ghost text run
+                let autosuggestion_run = if display_offset == 0 {
+                    let terminal = self.terminal.read(cx);
+                    let autosuggestion_enabled =
+                        TerminalSettings::get_global(cx).autosuggestion;
+                    if autosuggestion_enabled {
+                        if let Some(suggestion) = terminal.autosuggestion() {
+                            let ghost_cursor_col = cursor_point.col();
+                            let ghost_cursor_line = cursor_point.line();
+                            let total_columns = dimensions.columns();
+
+                            // Truncate suggestion to fit remaining columns
+                            let remaining_cols =
+                                total_columns.saturating_sub(ghost_cursor_col);
+                            let truncated: String =
+                                suggestion.chars().take(remaining_cols).collect();
+
+                            if !truncated.is_empty() {
+                                let ghost_color =
+                                    cx.theme().colors().text_placeholder;
+                                let start_col = ghost_cursor_col as i32;
+                                let text_len = truncated.len();
+
+                                Some(BatchedTextRun {
+                                    start_point: AlacPoint::new(
+                                        ghost_cursor_line,
+                                        start_col,
+                                    ),
+                                    text: truncated,
+                                    cell_count: text_len,
+                                    style: TextRun {
+                                        len: text_len,
+                                        font: text_style.font(),
+                                        color: ghost_color,
+                                        ..Default::default()
+                                    },
+                                    font_size: text_style.font_size,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 LayoutState {
                     hitbox,
                     batched_text_runs,
@@ -1915,6 +1967,7 @@ impl Element for TerminalElement {
                     block_below_cursor_element,
                     base_text_style: text_style,
                     content_mode,
+                    autosuggestion_run,
                 }
             },
         )
@@ -2042,6 +2095,11 @@ impl Element for TerminalElement {
                         batch.paint(origin, &layout.dimensions, window, cx);
                     }
                     let text_paint_time = text_paint_start.elapsed();
+
+                    // Paint autosuggestion ghost text after regular text
+                    if let Some(ref ghost_run) = layout.autosuggestion_run {
+                        ghost_run.paint(origin, &layout.dimensions, window, cx);
+                    }
 
                     if let Some(text_to_mark) = &marked_text_cloned
                         && !text_to_mark.is_empty()

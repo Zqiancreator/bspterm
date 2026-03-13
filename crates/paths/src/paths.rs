@@ -278,6 +278,12 @@ pub fn shortcut_bar_file() -> &'static PathBuf {
     SHORTCUT_BAR_FILE.get_or_init(|| config_dir().join("shortcut_bar.json"))
 }
 
+/// Returns the path to the `command_pool.json` file for terminal autosuggestion command pool.
+pub fn command_pool_file() -> &'static PathBuf {
+    static COMMAND_POOL_FILE: OnceLock<PathBuf> = OnceLock::new();
+    COMMAND_POOL_FILE.get_or_init(|| config_dir().join("command_pool.json"))
+}
+
 /// Returns the path to the `highlight_rules.json` file for terminal highlight rules configuration.
 pub fn highlight_rules_file() -> &'static PathBuf {
     static HIGHLIGHT_RULES_FILE: OnceLock<PathBuf> = OnceLock::new();

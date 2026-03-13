@@ -887,6 +887,8 @@ impl VsCodeSettings {
             ssh_keepalive_interval_secs: None,
             ssh_keepalive_max: None,
             group_tabs_by_session: None,
+            autosuggestion: None,
+            autosuggestion_max_age_days: None,
         })
     }
 
