@@ -198,6 +198,8 @@ remote_explorer:
   sort_name_ascending: "名称排序"
   pin_group: "置顶分组"
   unpin_group: "取消置顶"
+  switch_to_ssh: "切换为 SSH"
+  switch_to_telnet: "切换为 Telnet"
 
   sessions: "会话列表"
   filter_placeholder: "筛选会话..."
@@ -374,6 +376,8 @@ terminal:
   add_to_thread: "添加到 Agent 会话"
   close_tab: "关闭终端标签页"
   trace_call_graph: "追踪调用图"
+  switch_to_ssh: "切换为 SSH"
+  switch_to_telnet: "切换为 Telnet"
 
 # Script errors
 script:

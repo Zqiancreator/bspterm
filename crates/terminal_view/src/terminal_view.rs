@@ -43,10 +43,10 @@ use std::{
 };
 use task::TaskId;
 use terminal::{
-    Clear, ClearScrollback, Copy, Event, FunctionInvocation, HighlightStoreEntity, HoveredWord,
-    MaybeNavigationTarget, Paste, ScrollLineDown, ScrollLineUp, ScrollPageDown, ScrollPageUp,
-    ScrollToBottom, ScrollToTop, ShowCharacterPalette, TaskState, TaskStatus, Terminal,
-    TerminalBounds, ToggleViMode,
+    Clear, ClearScrollback, ConnectionInfo, Copy, Event, FunctionInvocation, HighlightStoreEntity,
+    HoveredWord, MaybeNavigationTarget, Paste, ScrollLineDown, ScrollLineUp, ScrollPageDown,
+    ScrollPageUp, ScrollToBottom, ScrollToTop, ShowCharacterPalette, TaskState, TaskStatus,
+    Terminal, TerminalBounds, ToggleViMode,
     alacritty_terminal::{
         index::Point as AlacPoint,
         term::{TermMode, point_to_viewport, search::RegexSearch},
@@ -101,9 +101,10 @@ use button_bar::ButtonBarScriptRunner;
 use function_bar::{FunctionBarConfigModal, AddFunctionModal, EditFunctionModal};
 use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
-    get_action_label, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
-    ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol, FunctionStoreEntity,
-    ShortcutBarStoreEntity, ShortcutBarStoreEvent, SuggestionHistoryEntity, ALL_SYSTEM_ACTIONS,
+    SessionStoreEntity, get_action_label, AbbreviationProtocol, AbbreviationStoreEntity,
+    AbbreviationStoreEvent, ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol,
+    FunctionStoreEntity, ShortcutBarStoreEntity, ShortcutBarStoreEvent, SuggestionHistoryEntity,
+    ALL_SYSTEM_ACTIONS,
 };
 use shortcut_bar::get_keybindings_for_action;
 use terminal_scripting::{ScriptingServer, TerminalRegistry};
@@ -3393,6 +3394,32 @@ print(output)
         }
     }
 
+    fn switch_protocol(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let connection_info = self.terminal.read(cx).connection_info().cloned();
+        let Some(connection_info) = connection_info else {
+            return;
+        };
+
+        let new_connection_info = connection_info.switch_protocol();
+
+        if let Some(session_id) = new_connection_info.session_id() {
+            let session_store = SessionStoreEntity::global(cx);
+            session_store.update(cx, |store, cx| {
+                store.update_session(session_id, |session| {
+                    session.switch_protocol();
+                }, cx);
+            });
+        }
+
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.disconnect();
+            terminal.set_connection_info(new_connection_info);
+            terminal.write_output(b"\x1b[33mSwitching protocol...\x1b[0m\r\n", cx);
+        });
+
+        self.reconnect_terminal(window, cx);
+    }
+
     fn duplicate_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let terminal = self.terminal.read(cx);
         if terminal.task().is_some() {
@@ -4508,7 +4535,14 @@ impl Item for TerminalView {
         let weak_view = cx.weak_entity();
         let mut actions: Vec<(SharedString, Option<Box<dyn gpui::Action>>, Rc<dyn Fn(&mut Window, &mut App)>)> = Vec::new();
 
-        if terminal.connection_info().is_some() {
+        if let Some(connection_info) = terminal.connection_info() {
+            let is_ssh = matches!(connection_info, ConnectionInfo::Ssh { .. });
+            let switch_label = if is_ssh {
+                t("terminal.switch_to_telnet")
+            } else {
+                t("terminal.switch_to_ssh")
+            };
+
             if terminal.is_disconnected() {
                 let weak_view = weak_view.clone();
                 actions.push((
@@ -4532,6 +4566,21 @@ impl Item for TerminalView {
                             terminal.disconnect();
                             terminal.print_user_disconnection_message(cx);
                         });
+                    }),
+                ));
+            }
+
+            {
+                let weak_view = weak_view.clone();
+                actions.push((
+                    switch_label,
+                    None,
+                    Rc::new(move |window, cx| {
+                        if let Some(view) = weak_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.switch_protocol(window, cx);
+                            });
+                        }
                     }),
                 ));
             }

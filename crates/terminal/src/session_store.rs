@@ -126,6 +126,44 @@ impl SessionConfig {
             protocol: ProtocolConfig::Telnet(telnet_config),
         }
     }
+
+    pub fn switch_protocol(&mut self) {
+        self.protocol = match &self.protocol {
+            ProtocolConfig::Ssh(ssh) => {
+                let port = if ssh.port == 22 { 23 } else { ssh.port };
+                ProtocolConfig::Telnet(TelnetSessionConfig {
+                    host: ssh.host.clone(),
+                    port,
+                    username: ssh.username.clone(),
+                    password: match &ssh.auth {
+                        AuthMethod::Password { password } => Some(password.clone()),
+                        _ => None,
+                    },
+                    encoding: None,
+                    terminal_type: ssh.terminal_type.clone(),
+                })
+            }
+            ProtocolConfig::Telnet(telnet) => {
+                let port = if telnet.port == 23 { 22 } else { telnet.port };
+                ProtocolConfig::Ssh(SshSessionConfig {
+                    host: telnet.host.clone(),
+                    port,
+                    username: telnet.username.clone(),
+                    auth: match &telnet.password {
+                        Some(password) => AuthMethod::Password {
+                            password: password.clone(),
+                        },
+                        None => AuthMethod::Interactive,
+                    },
+                    env: HashMap::new(),
+                    keepalive_interval_secs: Some(5),
+                    keepalive_max: Some(2),
+                    initial_command: None,
+                    terminal_type: telnet.terminal_type.clone(),
+                })
+            }
+        };
+    }
 }
 
 /// Protocol-specific configuration.

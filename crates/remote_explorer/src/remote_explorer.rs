@@ -818,8 +818,15 @@ impl RemoteExplorer {
         let session_store_entity = self.session_store.clone();
 
         let context_menu = match node {
-            SessionNode::Session(_) => {
+            SessionNode::Session(session) => {
+                let is_ssh = matches!(session.protocol, ProtocolConfig::Ssh(_));
+                let switch_label = if is_ssh {
+                    t("remote_explorer.switch_to_telnet")
+                } else {
+                    t("remote_explorer.switch_to_ssh")
+                };
                 let session_store_for_copy = session_store_entity.clone();
+                let session_store_for_switch = session_store_entity.clone();
                 ContextMenu::build(window, cx, move |menu, _window, _cx| {
                     let workspace_for_edit = workspace.clone();
 
@@ -843,6 +850,13 @@ impl RemoteExplorer {
                                 cx.write_to_clipboard(ClipboardItem::new_string(info));
                             }
                         }
+                    })
+                    .entry(switch_label, None, move |_window, cx| {
+                        session_store_for_switch.update(cx, |store, cx| {
+                            store.update_session(entry_id, |session| {
+                                session.switch_protocol();
+                            }, cx);
+                        });
                     })
                     .entry(t("remote_explorer.delete_session"), None, move |_window, cx| {
                         session_store_entity.update(cx, |store, cx| {

@@ -198,6 +198,8 @@ remote_explorer:
   sort_name_ascending: "Sort by Name"
   pin_group: "Pin Group"
   unpin_group: "Unpin Group"
+  switch_to_ssh: "Switch to SSH"
+  switch_to_telnet: "Switch to Telnet"
 
   sessions: "Sessions"
   filter_placeholder: "Filter sessions..."
@@ -374,6 +376,8 @@ terminal:
   add_to_thread: "Add to Agent Thread"
   close_tab: "Close Terminal Tab"
   trace_call_graph: "Trace Call Graph"
+  switch_to_ssh: "Switch to SSH"
+  switch_to_telnet: "Switch to Telnet"
 
 # Script errors
 script:

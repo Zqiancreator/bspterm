@@ -1544,6 +1544,56 @@ pub enum ConnectionInfo {
     },
 }
 
+impl ConnectionInfo {
+    pub fn session_id(&self) -> Option<uuid::Uuid> {
+        match self {
+            ConnectionInfo::Ssh { session_id, .. } | ConnectionInfo::Telnet { session_id, .. } => {
+                *session_id
+            }
+        }
+    }
+
+    pub fn switch_protocol(&self) -> ConnectionInfo {
+        match self {
+            ConnectionInfo::Ssh {
+                host,
+                port,
+                username,
+                password,
+                session_id,
+                ..
+            } => {
+                let new_port = if *port == 22 { 23 } else { *port };
+                ConnectionInfo::Telnet {
+                    host: host.clone(),
+                    port: new_port,
+                    username: username.clone(),
+                    password: password.clone(),
+                    session_id: *session_id,
+                }
+            }
+            ConnectionInfo::Telnet {
+                host,
+                port,
+                username,
+                password,
+                session_id,
+            } => {
+                let new_port = if *port == 23 { 22 } else { *port };
+                ConnectionInfo::Ssh {
+                    host: host.clone(),
+                    port: new_port,
+                    username: username.clone(),
+                    password: password.clone(),
+                    private_key_path: None,
+                    passphrase: None,
+                    session_id: *session_id,
+                }
+            }
+        }
+    }
+}
+
 fn resolve_group_path(connection_info: &Option<ConnectionInfo>, cx: &App) -> Vec<String> {
     let session_id = match connection_info {
         Some(ConnectionInfo::Ssh { session_id, .. }) | Some(ConnectionInfo::Telnet { session_id, .. }) => {
@@ -4371,6 +4421,10 @@ impl Terminal {
 
     pub fn connection_info(&self) -> Option<&ConnectionInfo> {
         self.connection_info.as_ref()
+    }
+
+    pub fn set_connection_info(&mut self, connection_info: ConnectionInfo) {
+        self.connection_info = Some(connection_info);
     }
 
     pub fn get_current_protocol(&self) -> Option<AbbreviationProtocol> {
