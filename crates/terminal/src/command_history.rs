@@ -108,7 +108,7 @@ fn prompt_patterns() -> &'static [Regex] {
 
 /// Extracts the prompt and command from a line of terminal output.
 /// Returns (prompt, command) if a valid prompt pattern is found with a non-empty command.
-fn extract_command(line: &str) -> Option<(String, String)> {
+pub(crate) fn extract_command(line: &str) -> Option<(String, String)> {
     let trimmed = line.trim_end();
     if trimmed.is_empty() {
         return None;
@@ -120,6 +120,28 @@ fn extract_command(line: &str) -> Option<(String, String)> {
                 let prompt = prompt_match.as_str().to_string();
                 let command = command_match.as_str().trim().to_string();
                 if !command.is_empty() {
+                    return Some((prompt, command));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Like `extract_command`, but preserves trailing whitespace in the command.
+/// Used by autosuggestion to keep the user's trailing spaces for accurate prefix matching.
+pub(crate) fn extract_command_preserve_trailing(line: &str) -> Option<(String, String)> {
+    if line.trim().is_empty() {
+        return None;
+    }
+
+    for pattern in prompt_patterns() {
+        if let Some(caps) = pattern.captures(line) {
+            if let (Some(prompt_match), Some(command_match)) = (caps.get(1), caps.get(2)) {
+                let prompt = prompt_match.as_str().to_string();
+                let command = command_match.as_str().to_string();
+                if !command.trim().is_empty() {
                     return Some((prompt, command));
                 }
             }
@@ -755,5 +777,35 @@ mod tests {
 
         pool.clear();
         assert_eq!(pool.commands().len(), 0);
+    }
+
+    #[test]
+    fn test_extract_command_preserve_trailing() {
+        // Trailing space preserved for autosuggestion prefix matching
+        let result = extract_command_preserve_trailing("user@host:~$ ls ");
+        assert!(result.is_some());
+        let (prompt, cmd) = result.unwrap();
+        assert_eq!(prompt, "user@host:~$");
+        assert_eq!(cmd, "ls ");
+
+        // No trailing space — same as extract_command
+        let result = extract_command_preserve_trailing("user@host:~$ ls");
+        assert!(result.is_some());
+        let (_, cmd) = result.unwrap();
+        assert_eq!(cmd, "ls");
+
+        // Multiple trailing spaces preserved
+        let result = extract_command_preserve_trailing("user@host:~$ ls -la  ");
+        assert!(result.is_some());
+        let (_, cmd) = result.unwrap();
+        assert_eq!(cmd, "ls -la  ");
+
+        // Prompt only (no command after spaces) — returns None
+        let result = extract_command_preserve_trailing("user@host:~$   ");
+        assert!(result.is_none());
+
+        // Empty line — returns None
+        let result = extract_command_preserve_trailing("   ");
+        assert!(result.is_none());
     }
 }

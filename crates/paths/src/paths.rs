@@ -284,6 +284,12 @@ pub fn command_pool_file() -> &'static PathBuf {
     COMMAND_POOL_FILE.get_or_init(|| config_dir().join("command_pool.json"))
 }
 
+/// Returns the path to the `suggestion_history.json` file for terminal autosuggestion history.
+pub fn suggestion_history_file() -> &'static PathBuf {
+    static SUGGESTION_HISTORY_FILE: OnceLock<PathBuf> = OnceLock::new();
+    SUGGESTION_HISTORY_FILE.get_or_init(|| config_dir().join("suggestion_history.json"))
+}
+
 /// Returns the path to the `highlight_rules.json` file for terminal highlight rules configuration.
 pub fn highlight_rules_file() -> &'static PathBuf {
     static HIGHLIGHT_RULES_FILE: OnceLock<PathBuf> = OnceLock::new();

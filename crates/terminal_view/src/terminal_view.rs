@@ -21,7 +21,7 @@ use assistant_slash_command::SlashCommandRegistry;
 use chrono::Datelike;
 use editor::{Editor, EditorSettings, actions::SelectAll, blink_manager::BlinkManager};
 use gpui::{
-    Action, AnyElement, App, ClipboardEntry, DismissEvent, DragMoveEvent, Entity, EventEmitter,
+    Action, AnyElement, App, AppContext as _, ClipboardEntry, DismissEvent, DragMoveEvent, Entity, EventEmitter,
     FocusHandle, Focusable, KeyBindingContextPredicate, KeyContext, KeyDownEvent,
     KeybindingKeystroke, Keystroke, KeystrokeEvent, Modifiers, MouseButton, MouseDownEvent, Pixels,
     Point, Render, ScrollWheelEvent, Styled, Subscription, Task, WeakEntity, actions, anchored,
@@ -103,7 +103,7 @@ use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     get_action_label, AbbreviationProtocol, AbbreviationStoreEntity, AbbreviationStoreEvent,
     ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol, FunctionStoreEntity,
-    GlobalCommandPoolEntity, ShortcutBarStoreEntity, ShortcutBarStoreEvent, ALL_SYSTEM_ACTIONS,
+    ShortcutBarStoreEntity, ShortcutBarStoreEvent, SuggestionHistoryEntity, ALL_SYSTEM_ACTIONS,
 };
 use shortcut_bar::get_keybindings_for_action;
 use terminal_scripting::{ScriptingServer, TerminalRegistry};
@@ -234,7 +234,7 @@ pub fn init(cx: &mut App) {
     ShortcutBarStoreEntity::init(cx);
     HighlightStoreEntity::init(cx);
     let max_age_days = TerminalSettings::get_global(cx).autosuggestion_max_age_days;
-    GlobalCommandPoolEntity::init_with_max_age(cx, Some(max_age_days));
+    SuggestionHistoryEntity::init_with_max_age(cx, Some(max_age_days));
     KeystrokeRecordingState::init(cx);
 
     fn ensure_session_log_directory(cx: &App) {
@@ -2902,8 +2902,8 @@ print(output)
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
-            pool_entity.update(cx, |pool, cx| pool.clear(cx));
+        if let Some(history_entity) = SuggestionHistoryEntity::try_global(cx) {
+            history_entity.update(cx, |history, cx| history.clear(cx));
         }
         self.terminal
             .update(cx, |terminal, _| terminal.clear_autosuggestion());

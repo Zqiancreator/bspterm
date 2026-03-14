@@ -15,6 +15,7 @@ pub mod rule_store;
 pub mod session_logger;
 pub mod session_store;
 pub mod shortcut_bar_store;
+pub mod suggestion_history;
 pub mod terminal_lsp;
 
 pub use alacritty_terminal;
@@ -60,6 +61,10 @@ pub use command_history::{
     CommandHistory, ContextualCommand, GlobalCommandPool, GlobalCommandPoolEntity,
     GlobalCommandPoolEvent, GlobalCommandPoolMarker, PromptContext, TerminalCommand,
     classify_prompt, normalize_sub_view,
+};
+
+pub use suggestion_history::{
+    GlobalSuggestionHistory, SuggestionHistory, SuggestionHistoryEntity, SuggestionHistoryEvent,
 };
 
 pub use session_logger::{SessionLogger, SessionMetadata};
@@ -552,6 +557,7 @@ impl TerminalBuilder {
             last_user_input_time: None,
             reconnected_while_unfocused: false,
             autosuggestion: None,
+            autosuggestion_needs_update: false,
         };
 
         Ok(TerminalBuilder {
@@ -805,6 +811,7 @@ impl TerminalBuilder {
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
+                autosuggestion_needs_update: false,
             };
 
             if !activation_script.is_empty() && no_task {
@@ -1027,6 +1034,7 @@ impl TerminalBuilder {
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
+                autosuggestion_needs_update: false,
             };
 
             terminal.init_rule_engine();
@@ -1216,6 +1224,7 @@ impl TerminalBuilder {
                 last_user_input_time: None,
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
+                autosuggestion_needs_update: false,
             };
 
             terminal.init_rule_engine();
@@ -1400,6 +1409,7 @@ impl TerminalBuilder {
             last_user_input_time: None,
             reconnected_while_unfocused: false,
             autosuggestion: None,
+            autosuggestion_needs_update: false,
         };
 
         terminal.init_rule_engine();
@@ -1610,6 +1620,9 @@ pub struct Terminal {
     reconnected_while_unfocused: bool,
     /// Current autosuggestion suffix (ghost text shown after cursor).
     autosuggestion: Option<String>,
+    /// When true, autosuggestion will be recalculated on the next Wakeup event
+    /// (after the grid has been updated with PTY echo).
+    autosuggestion_needs_update: bool,
 }
 
 struct CopyTemplate {
@@ -1751,6 +1764,16 @@ impl Terminal {
                 self.check_rules(rule_store::TriggerEvent::Wakeup, cx);
 
                 cx.emit(Event::Wakeup);
+
+                if self.autosuggestion_needs_update {
+                    let enabled = TerminalSettings::get_global(cx).autosuggestion;
+                    if enabled {
+                        self.update_autosuggestion(cx);
+                    } else {
+                        self.autosuggestion_needs_update = false;
+                    }
+                    cx.notify();
+                }
 
                 self.emit_title_changed_if_process_changed(cx);
             }
@@ -2539,14 +2562,23 @@ impl Terminal {
             // Check if this is Enter key
             let is_enter = input_bytes.iter().any(|&b| b == b'\r' || b == b'\n');
 
-            // For Enter, record command to global pool BEFORE buffers get cleared
-            if is_enter && !self.current_line_buffer.trim().is_empty() {
-                let command = self.current_line_buffer.trim().to_string();
-                let context = self.detect_prompt_context();
-                if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
-                    pool_entity.update(cx, |pool, cx| {
-                        pool.add_command(command, context, cx);
-                    });
+            // For Enter, record command to suggestion history BEFORE buffers get cleared
+            if is_enter {
+                // Primary: read from grid (accurate even after Tab completion)
+                let command = if let Some((_prompt, input)) = self.read_user_input_from_grid() {
+                    if input.trim().is_empty() { None } else { Some(input) }
+                } else if !self.current_line_buffer.trim().is_empty() {
+                    // Fallback: use current_line_buffer
+                    Some(self.current_line_buffer.trim().to_string())
+                } else {
+                    None
+                };
+                if let Some(command) = command {
+                    if let Some(history_entity) = SuggestionHistoryEntity::try_global(cx) {
+                        history_entity.update(cx, |history, cx| {
+                            history.add_command(command, cx);
+                        });
+                    }
                 }
             }
 
@@ -2647,6 +2679,7 @@ impl Terminal {
                     self.current_line_buffer.clear();
                 }
                 self.autosuggestion = None;
+                self.autosuggestion_needs_update = true;
             } else {
                 self.update_input_buffers(input_bytes);
             }
@@ -2655,13 +2688,18 @@ impl Terminal {
             if abbr_enabled && !is_enter {
                 if let Some(expansion) = self.try_expand_abbreviation(cx) {
                     self.apply_expansion(&expansion);
-                    self.update_autosuggestion(cx);
+                    // Clear old ghost text immediately; defer recalculation to Wakeup
+                    self.autosuggestion = None;
+                    self.autosuggestion_needs_update = true;
                     return true;
                 }
             }
 
             self.input(input_bytes.to_vec());
-            self.update_autosuggestion(cx);
+            // Clear old ghost text immediately; defer recalculation to Wakeup
+            // (grid will have updated content after PTY echo)
+            self.autosuggestion = None;
+            self.autosuggestion_needs_update = true;
             log::debug!("terminal_key: try_keystroke sent to input, key={:?}", keystroke);
             true
         } else {
@@ -3118,23 +3156,62 @@ impl Terminal {
         classify_prompt(prompt)
     }
 
-    /// Updates the autosuggestion by querying the global command pool.
-    pub fn update_autosuggestion(&mut self, cx: &App) {
-        if self.current_line_buffer.is_empty() {
-            self.autosuggestion = None;
-            return;
+    /// Reads the user input from the terminal grid by examining the cursor line.
+    /// Returns `(prompt, user_input)` if a known prompt pattern is found.
+    /// Preserves trailing whitespace in user_input for accurate autosuggestion prefix matching.
+    fn read_user_input_from_grid(&self) -> Option<(String, String)> {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let cursor_point = grid.cursor.point;
+        let cursor_col = cursor_point.column.0;
+
+        // Read from column 0 up to (but not including) cursor column.
+        // The cursor sits on the next cell to be written, so it is NOT part of user input.
+        let mut line_text = String::new();
+        let row = &grid[cursor_point.line];
+        for col in 0..cursor_col {
+            let cell = &row[Column(col)];
+            line_text.push(cell.c);
         }
+        drop(term);
+
+        // Don't trim_end — trailing spaces ARE part of user input (e.g. "ls ")
+        if line_text.trim().is_empty() {
+            return None;
+        }
+
+        command_history::extract_command_preserve_trailing(&line_text)
+    }
+
+    /// Updates the autosuggestion by querying the suggestion history.
+    /// Prefers reading user input from the grid (accurate after PTY echo),
+    /// falls back to `current_line_buffer` if no prompt pattern is detected.
+    pub fn update_autosuggestion(&mut self, cx: &App) {
+        self.autosuggestion_needs_update = false;
 
         if self.last_content.mode.contains(TermMode::ALT_SCREEN) {
             self.autosuggestion = None;
             return;
         }
 
-        let context = self.detect_prompt_context();
-        if let Some(pool_entity) = GlobalCommandPoolEntity::try_global(cx) {
-            let pool = pool_entity.read(cx);
-            if let Some(full_command) = pool.find_suggestion(&self.current_line_buffer, &context) {
-                let suffix = &full_command[self.current_line_buffer.len()..];
+        // Primary path: read user input directly from the grid
+        let user_input = if let Some((_prompt, input)) = self.read_user_input_from_grid() {
+            input
+        } else {
+            // Fallback: use current_line_buffer when grid has no recognizable prompt.
+            // Don't trim — trailing spaces are significant for autosuggestion prefix matching.
+            self.current_line_buffer.clone()
+        };
+
+        if user_input.is_empty() {
+            self.autosuggestion = None;
+            return;
+        }
+
+        if let Some(history_entity) = SuggestionHistoryEntity::try_global(cx) {
+            let history = history_entity.read(cx);
+            if let Some(full_command) = history.find_suggestion(&user_input) {
+                let suffix = &full_command[user_input.len()..];
                 self.autosuggestion = Some(suffix.to_string());
             } else {
                 self.autosuggestion = None;
@@ -6089,6 +6166,355 @@ mod tests {
                 term.current_line_buffer.clear();
                 assert_eq!(term.current_line_buffer, "");
                 assert_eq!(term.current_word_buffer, "");
+            });
+        }
+    }
+
+    mod autosuggestion_tests {
+        use super::super::*;
+        use crate::suggestion_history::SuggestionHistoryEntity;
+        use gpui::{Entity, TestAppContext};
+
+        /// Build display-only terminal with SuggestionHistoryEntity global
+        /// populated with the given history commands.
+        fn build_terminal_with_history(
+            cx: &mut TestAppContext,
+            history_commands: &[&str],
+        ) -> Entity<Terminal> {
+            cx.update(|cx| {
+                let settings_store = settings::SettingsStore::test(cx);
+                cx.set_global(settings_store);
+                SuggestionHistoryEntity::init_with_max_age(cx, None);
+            });
+
+            let history_entity =
+                cx.update(|cx| SuggestionHistoryEntity::try_global(cx).unwrap());
+            for cmd in history_commands {
+                history_entity.update(cx, |history, cx| {
+                    history.add_command(cmd.to_string(), cx);
+                });
+            }
+
+            let window = cx.add_empty_window();
+            let builder = window.update(|_window, cx| {
+                TerminalBuilder::new_display_only(
+                    CursorShape::default(),
+                    AlternateScroll::On,
+                    None,
+                    0,
+                    cx.background_executor(),
+                    PathStyle::local(),
+                )
+                .unwrap()
+            });
+            window.new(|cx| builder.subscribe(cx))
+        }
+
+        /// Write text into the alacritty grid (simulating PTY echo).
+        fn write_to_grid(terminal: &mut Terminal, text: &[u8]) {
+            let mut processor = alacritty_terminal::vte::ansi::Processor::<
+                alacritty_terminal::vte::ansi::StdSyncHandler,
+            >::new();
+            let mut term = terminal.term.lock();
+            processor.advance(&mut *term, text);
+        }
+
+        // ── read_user_input_from_grid tests ──────────────────────────────
+
+        #[gpui::test]
+        async fn grid_basic_command(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(
+                    result,
+                    Some(("user@host:~$".to_string(), "ls".to_string()))
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_command_with_trailing_space(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls ");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(
+                    result,
+                    Some(("user@host:~$".to_string(), "ls ".to_string()))
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_command_with_multiple_trailing_spaces(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls  ");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(
+                    result,
+                    Some(("user@host:~$".to_string(), "ls  ".to_string()))
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_command_with_args(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls -la");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(
+                    result,
+                    Some(("user@host:~$".to_string(), "ls -la".to_string()))
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_empty_after_prompt(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(result, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_huawei_prompt(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"<Huawei>display ver");
+                let result = term.read_user_input_from_grid();
+                assert_eq!(
+                    result,
+                    Some(("<Huawei>".to_string(), "display ver".to_string()))
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_empty_grid(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                let result = term.read_user_input_from_grid();
+                assert_eq!(result, None);
+            });
+        }
+
+        // ── update_autosuggestion fallback path tests ────────────────────
+
+        #[gpui::test]
+        async fn fallback_basic_match(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_after_space(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls ");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("-lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_partial_arg(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls -l");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("ahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_no_match(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"xyz");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_exact_match(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls -lahtr");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_empty_buffer(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_multiword(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["show interfaces"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"show ");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("interfaces".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn fallback_multiword_partial(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["show interfaces"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"show i");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("nterfaces".to_string()));
+            });
+        }
+
+        // ── update_autosuggestion grid path tests ────────────────────────
+
+        #[gpui::test]
+        async fn grid_basic_suggestion(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_after_space_no_double(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ ls ");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("-lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn grid_multiword_after_space(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["show interfaces"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ show ");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("interfaces".to_string()));
+            });
+        }
+
+        // ── accept_full_autosuggestion tests ─────────────────────────────
+
+        #[gpui::test]
+        async fn accept_full_basic(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+
+                let line_before = term.current_line_buffer.clone();
+                term.accept_full_autosuggestion();
+                assert_eq!(
+                    term.current_line_buffer,
+                    format!("{}{}", line_before, " -lahtr")
+                );
+            });
+        }
+
+        #[gpui::test]
+        async fn accept_full_clears_suggestion(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                term.update_input_buffers(b"ls ");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some("-lahtr".to_string()));
+
+                term.accept_full_autosuggestion();
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn accept_full_noop_when_none(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                term.update_input_buffers(b"ls");
+                let line_before = term.current_line_buffer.clone();
+                let word_before = term.current_word_buffer.clone();
+
+                term.accept_full_autosuggestion();
+
+                assert_eq!(term.current_line_buffer, line_before);
+                assert_eq!(term.current_word_buffer, word_before);
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        // ── accept_word_autosuggestion tests ─────────────────────────────
+
+        #[gpui::test]
+        async fn accept_word_single_word(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                term.autosuggestion = Some("-lahtr".to_string());
+                term.accept_word_autosuggestion();
+                // "-lahtr" has no whitespace, so the entire suggestion is accepted
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        #[gpui::test]
+        async fn accept_word_multi_word(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                term.autosuggestion = Some("-la /tmp".to_string());
+                term.accept_word_autosuggestion();
+                // Accepts "-la " (up to and including the space), remaining = "/tmp"
+                assert_eq!(term.autosuggestion, Some("/tmp".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn accept_word_leading_space(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                term.autosuggestion = Some(" -lahtr".to_string());
+                term.accept_word_autosuggestion();
+                // Leading space is whitespace at pos 0, next non-ws at pos 1,
+                // so word_end=1: accepts " ", remaining = "-lahtr"
+                assert_eq!(term.autosuggestion, Some("-lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn accept_word_noop_when_none(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                term.update_input_buffers(b"ls");
+                let line_before = term.current_line_buffer.clone();
+                let word_before = term.current_word_buffer.clone();
+
+                term.accept_word_autosuggestion();
+
+                assert_eq!(term.current_line_buffer, line_before);
+                assert_eq!(term.current_word_buffer, word_before);
+                assert_eq!(term.autosuggestion, None);
             });
         }
     }
