@@ -1895,46 +1895,51 @@ impl Element for TerminalElement {
                     None
                 };
 
-                // Compute autosuggestion ghost text run
+                // Compute autosuggestion ghost text run.
+                // Only render when cursor is at the end of input (Fish shell behavior).
                 let autosuggestion_run = if display_offset == 0 {
                     let terminal = self.terminal.read(cx);
                     let autosuggestion_enabled =
                         TerminalSettings::get_global(cx).autosuggestion;
                     if autosuggestion_enabled {
                         if let Some(suggestion) = terminal.autosuggestion() {
-                            let ghost_cursor_col = cursor_point.col();
-                            let ghost_cursor_line = cursor_point.line();
-                            let total_columns = dimensions.columns();
-
-                            // Truncate suggestion to fit remaining columns
-                            let remaining_cols =
-                                total_columns.saturating_sub(ghost_cursor_col);
-                            let truncated: String =
-                                suggestion.chars().take(remaining_cols).collect();
-
-                            if !truncated.is_empty() {
-                                let ghost_color =
-                                    cx.theme().colors().text_placeholder;
-                                let start_col = ghost_cursor_col as i32;
-                                let text_len = truncated.len();
-
-                                Some(BatchedTextRun {
-                                    start_point: AlacPoint::new(
-                                        ghost_cursor_line,
-                                        start_col,
-                                    ),
-                                    text: truncated,
-                                    cell_count: text_len,
-                                    style: TextRun {
-                                        len: text_len,
-                                        font: text_style.font(),
-                                        color: ghost_color,
-                                        ..Default::default()
-                                    },
-                                    font_size: text_style.font_size,
-                                })
-                            } else {
+                            if !terminal.is_cursor_at_end_of_input() {
                                 None
+                            } else {
+                                let ghost_cursor_col = cursor_point.col();
+                                let ghost_cursor_line = cursor_point.line();
+                                let total_columns = dimensions.columns();
+
+                                // Truncate suggestion to fit remaining columns
+                                let remaining_cols =
+                                    total_columns.saturating_sub(ghost_cursor_col);
+                                let truncated: String =
+                                    suggestion.chars().take(remaining_cols).collect();
+
+                                if !truncated.is_empty() {
+                                    let ghost_color =
+                                        cx.theme().colors().text_placeholder;
+                                    let start_col = ghost_cursor_col as i32;
+                                    let text_len = truncated.len();
+
+                                    Some(BatchedTextRun {
+                                        start_point: AlacPoint::new(
+                                            ghost_cursor_line,
+                                            start_col,
+                                        ),
+                                        text: truncated,
+                                        cell_count: text_len,
+                                        style: TextRun {
+                                            len: text_len,
+                                            font: text_style.font(),
+                                            color: ghost_color,
+                                            ..Default::default()
+                                        },
+                                        font_size: text_style.font_size,
+                                    })
+                                } else {
+                                    None
+                                }
                             }
                         } else {
                             None

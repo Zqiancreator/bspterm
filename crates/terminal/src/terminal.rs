@@ -2484,65 +2484,82 @@ impl Terminal {
             return true;
         }
 
-        // Intercept Right/Ctrl+Right for autosuggestion acceptance (before escape sequence handling)
+        // Intercept Right/Ctrl+Right/End etc. for autosuggestion acceptance (before escape sequence handling).
+        // Only accept when cursor is at the end of input (fish shell behavior).
+        // When cursor is NOT at end, fall through so the key is sent to the shell normally.
         if self.autosuggestion.is_some()
             && !self.last_content.mode.contains(TermMode::ALT_SCREEN)
         {
-            if keystroke.key.as_str() == "right" && keystroke.modifiers == Modifiers::none() {
+            let cursor_at_end = self.is_cursor_at_end_of_input();
+
+            // Right → at end: accept full; otherwise fall through (cursor right)
+            if keystroke.key.as_str() == "right"
+                && keystroke.modifiers == Modifiers::none()
+                && cursor_at_end
+            {
                 self.accept_full_autosuggestion();
                 cx.notify();
                 return true;
             }
+            // Ctrl+Right → at end: accept word; otherwise fall through
             if keystroke.key.as_str() == "right"
                 && keystroke.modifiers.control
                 && !keystroke.modifiers.alt
                 && !keystroke.modifiers.shift
+                && cursor_at_end
             {
                 self.accept_word_autosuggestion();
                 cx.notify();
                 return true;
             }
-            // Ctrl+F → accept full (fish forward-char)
+            // Ctrl+F → at end: accept full (fish forward-char)
             if keystroke.key.as_str() == "f"
                 && keystroke.modifiers.control
                 && !keystroke.modifiers.alt
                 && !keystroke.modifiers.shift
+                && cursor_at_end
             {
                 self.accept_full_autosuggestion();
                 cx.notify();
                 return true;
             }
-            // Ctrl+E → accept full (fish end-of-line)
+            // Ctrl+E → at end: accept full (fish end-of-line)
             if keystroke.key.as_str() == "e"
                 && keystroke.modifiers.control
                 && !keystroke.modifiers.alt
                 && !keystroke.modifiers.shift
+                && cursor_at_end
             {
                 self.accept_full_autosuggestion();
                 cx.notify();
                 return true;
             }
-            // End → accept full (fish end-of-line)
-            if keystroke.key.as_str() == "end" && keystroke.modifiers == Modifiers::none() {
+            // End → at end: accept full (fish end-of-line)
+            if keystroke.key.as_str() == "end"
+                && keystroke.modifiers == Modifiers::none()
+                && cursor_at_end
+            {
                 self.accept_full_autosuggestion();
                 cx.notify();
                 return true;
             }
-            // Alt+F → accept word (fish forward-word)
+            // Alt+F → at end: accept word (fish forward-word)
             if keystroke.key.as_str() == "f"
                 && keystroke.modifiers.alt
                 && !keystroke.modifiers.control
                 && !keystroke.modifiers.shift
+                && cursor_at_end
             {
                 self.accept_word_autosuggestion();
                 cx.notify();
                 return true;
             }
-            // Alt+Right → accept word (fish forward-word)
+            // Alt+Right → at end: accept word (fish forward-word)
             if keystroke.key.as_str() == "right"
                 && keystroke.modifiers.alt
                 && !keystroke.modifiers.control
                 && !keystroke.modifiers.shift
+                && cursor_at_end
             {
                 self.accept_word_autosuggestion();
                 cx.notify();
@@ -2675,11 +2692,14 @@ impl Terminal {
                 // Don't pass these through update_input_buffers() as the bytes after ESC
                 // are in printable ASCII range and would corrupt the buffers.
                 if matches!(keystroke.key.as_str(), "up" | "down") {
+                    // History navigation: clear buffers + suggestion, let Wakeup recalculate
                     self.current_word_buffer.clear();
                     self.current_line_buffer.clear();
+                    self.autosuggestion = None;
+                    self.autosuggestion_needs_update = true;
                 }
-                self.autosuggestion = None;
-                self.autosuggestion_needs_update = true;
+                // Other navigation keys: suggestion data stays in memory;
+                // the rendering guard hides/shows ghost text based on cursor position.
             } else {
                 self.update_input_buffers(input_bytes);
             }
@@ -2696,9 +2716,9 @@ impl Terminal {
             }
 
             self.input(input_bytes.to_vec());
-            // Clear old ghost text immediately; defer recalculation to Wakeup
-            // (grid will have updated content after PTY echo)
-            self.autosuggestion = None;
+            // Instant suggestion update from buffer to reduce flicker;
+            // Wakeup will do the authoritative grid-based update.
+            self.update_autosuggestion_from_buffer(cx);
             self.autosuggestion_needs_update = true;
             log::debug!("terminal_key: try_keystroke sent to input, key={:?}", keystroke);
             true
@@ -3123,6 +3143,23 @@ impl Terminal {
         self.autosuggestion = None;
     }
 
+    /// Checks whether the cursor is at the end of the user's input on the current line.
+    pub fn is_cursor_at_end_of_input(&self) -> bool {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let cursor_point = grid.cursor.point;
+        let cursor_col = cursor_point.column.0;
+        let row = &grid[cursor_point.line];
+        let columns = grid.columns();
+        for col in cursor_col..columns {
+            let c = row[Column(col)].c;
+            if c != ' ' && c != '\0' {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Detects the prompt context from the current terminal line.
     /// Reads the cursor line from the term grid and strips the user input to extract the prompt.
     pub fn detect_prompt_context(&self) -> PromptContext {
@@ -3189,6 +3226,13 @@ impl Terminal {
     pub fn update_autosuggestion(&mut self, cx: &App) {
         self.autosuggestion_needs_update = false;
 
+        // When cursor is not at end of input, preserve existing suggestion data
+        // in memory — the rendering guard will hide it, and it reappears when
+        // cursor returns to end (Fish shell behavior).
+        if !self.is_cursor_at_end_of_input() {
+            return;
+        }
+
         if self.last_content.mode.contains(TermMode::ALT_SCREEN) {
             self.autosuggestion = None;
             return;
@@ -3213,6 +3257,33 @@ impl Terminal {
             if let Some(full_command) = history.find_suggestion(&user_input) {
                 let suffix = &full_command[user_input.len()..];
                 self.autosuggestion = Some(suffix.to_string());
+            } else {
+                self.autosuggestion = None;
+            }
+        } else {
+            self.autosuggestion = None;
+        }
+    }
+
+    /// Instantly updates autosuggestion from the current line buffer (without waiting for Wakeup).
+    /// This reduces flicker by providing immediate feedback as the user types.
+    fn update_autosuggestion_from_buffer(&mut self, cx: &App) {
+        if self.last_content.mode.contains(TermMode::ALT_SCREEN) {
+            self.autosuggestion = None;
+            return;
+        }
+
+        if self.current_line_buffer.is_empty() {
+            self.autosuggestion = None;
+            return;
+        }
+
+        if let Some(history_entity) = SuggestionHistoryEntity::try_global(cx) {
+            let history = history_entity.read(cx);
+            if let Some(full_command) = history.find_suggestion(&self.current_line_buffer) {
+                let suffix = &full_command[self.current_line_buffer.len()..];
+                self.autosuggestion = Some(suffix.to_string());
+                // Keep existing end_col/line — Wakeup will do the authoritative update with grid data
             } else {
                 self.autosuggestion = None;
             }
@@ -6514,6 +6585,143 @@ mod tests {
 
                 assert_eq!(term.current_line_buffer, line_before);
                 assert_eq!(term.current_word_buffer, word_before);
+                assert_eq!(term.autosuggestion, None);
+            });
+        }
+
+        // ── is_cursor_at_end_of_input tests ─────────────────────────────
+
+        #[gpui::test]
+        async fn cursor_at_end_empty_grid(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                assert!(term.is_cursor_at_end_of_input());
+            });
+        }
+
+        #[gpui::test]
+        async fn cursor_at_end_after_typing(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                assert!(term.is_cursor_at_end_of_input());
+            });
+        }
+
+        #[gpui::test]
+        async fn cursor_not_at_end_after_left(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                // Move cursor left one position via ANSI escape
+                write_to_grid(term, b"\x1b[D");
+                assert!(!term.is_cursor_at_end_of_input());
+            });
+        }
+
+        #[gpui::test]
+        async fn cursor_not_at_end_after_home(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls -la");
+                // Move cursor to column 0 via ANSI escape
+                write_to_grid(term, b"\x1b[H");
+                assert!(!term.is_cursor_at_end_of_input());
+            });
+        }
+
+        #[gpui::test]
+        async fn cursor_back_to_end_after_right(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &[]);
+            terminal.update(cx, |term, _cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                // Move left then right — back at end
+                write_to_grid(term, b"\x1b[D\x1b[C");
+                assert!(term.is_cursor_at_end_of_input());
+            });
+        }
+
+        // ── cursor position guard in update_autosuggestion tests ────────
+
+        #[gpui::test]
+        async fn update_skipped_when_cursor_not_at_end(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                // First update at end — should produce suggestion
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+
+                // Move cursor left — no longer at end
+                write_to_grid(term, b"\x1b[D");
+                assert!(!term.is_cursor_at_end_of_input());
+
+                // Calling update_autosuggestion should early-return,
+                // preserving the existing suggestion in memory
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn suggestion_preserved_after_cursor_move_left(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["show interfaces"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ show");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" interfaces".to_string()));
+
+                // Move cursor left 3 positions
+                write_to_grid(term, b"\x1b[3D");
+                // Suggestion data still in memory
+                assert_eq!(term.autosuggestion, Some(" interfaces".to_string()));
+                // But cursor is not at end
+                assert!(!term.is_cursor_at_end_of_input());
+            });
+        }
+
+        #[gpui::test]
+        async fn suggestion_reappears_when_cursor_returns_to_end(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+
+                // Move cursor left — suggestion hidden (cursor not at end)
+                write_to_grid(term, b"\x1b[D");
+                assert!(!term.is_cursor_at_end_of_input());
+
+                // update_autosuggestion preserves data
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+
+                // Move cursor back to end
+                write_to_grid(term, b"\x1b[C");
+                assert!(term.is_cursor_at_end_of_input());
+                // Suggestion still present — would be visible again in rendering
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn update_proceeds_when_cursor_at_end(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ ls");
+                assert!(term.is_cursor_at_end_of_input());
+                term.update_autosuggestion(cx);
+                assert_eq!(term.autosuggestion, Some(" -lahtr".to_string()));
+            });
+        }
+
+        #[gpui::test]
+        async fn update_clears_suggestion_when_no_match_at_end(cx: &mut TestAppContext) {
+            let terminal = build_terminal_with_history(cx, &["ls -lahtr"]);
+            terminal.update(cx, |term, cx| {
+                write_to_grid(term, b"user@host:~$ xyz");
+                assert!(term.is_cursor_at_end_of_input());
+                term.update_autosuggestion(cx);
                 assert_eq!(term.autosuggestion, None);
             });
         }

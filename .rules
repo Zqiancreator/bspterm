@@ -157,6 +157,22 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
 - **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
 
+## Terminal Autosuggestion (Fish-style)
+
+Fish-style autosuggestion in `terminal.rs` + `terminal_element.rs`. Shows ghost text (command completion) after cursor based on `SuggestionHistoryEntity`.
+
+**核心行为：光标在输入末尾时才显示 ghost text（对齐 Fish Shell）。**
+
+- `autosuggestion: Option<String>` — suggestion 后缀数据，始终保留在内存中（即使光标不在末尾）
+- `autosuggestion_needs_update: bool` — Wakeup 时是否需要重算
+- `is_cursor_at_end_of_input()` — 检查光标后（同行）是否全为空格/`\0`
+- **渲染守卫**（`terminal_element.rs`）：`is_cursor_at_end_of_input()` 返回 false 则不渲染 ghost text，直接用 `cursor_point` 定位
+- **更新守卫**（`update_autosuggestion()`）：光标不在末尾时 early return，保留已有 suggestion 数据
+- 导航键（left/home/right/end）不清除 suggestion 数据，仅 up/down（历史导航）清除并标记重算
+- `update_autosuggestion_from_buffer()` — 按键后立即从 `current_line_buffer` 匹配，减少闪烁
+- `accept_full_autosuggestion()` / `accept_word_autosuggestion()` — 接受全部/一个词
+- 测试：`cargo test -p terminal autosuggestion -j 6`（含 cursor guard 测试）
+
 ## Terminal Input Buffers & Paste
 
 `paste()` 先 `clear_input_buffers()` 再 `update_input_buffers(normalized_bytes)`，保证粘贴后 `current_line_buffer` / `current_word_buffer` 反映粘贴内容（用于缩写展开、函数触发等）。
