@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
@@ -7,6 +8,9 @@ use uuid::Uuid;
 
 use crate::config_store::{JsonConfigStore, default_true};
 use crate::highlight_rule::{HighlightProtocol, HighlightRule, TerminalTokenType};
+
+const DEFAULT_HIGHLIGHT_RULES: &[u8] =
+    include_bytes!("../../../assets/settings/default_highlight_rules.json");
 
 /// The highlight store containing all highlight rule configurations.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -182,6 +186,62 @@ pub enum HighlightStoreEvent {
 pub struct GlobalHighlightStore(pub Entity<HighlightStoreEntity>);
 impl Global for GlobalHighlightStore {}
 
+/// Ensure default highlight rules are installed to user directory.
+/// Only writes the default rules if the file doesn't exist or has an older version.
+fn ensure_default_highlights() {
+    let rules_path = paths::highlight_rules_file();
+
+    if let Some(parent) = rules_path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            log::error!("Failed to create config directory: {}", error);
+            return;
+        }
+    }
+
+    if rules_path.exists() {
+        match fs::read_to_string(&rules_path) {
+            Ok(content) => {
+                #[derive(Deserialize)]
+                struct VersionOnly {
+                    #[serde(default)]
+                    version: u32,
+                }
+                match serde_json::from_str::<VersionOnly>(&content) {
+                    Ok(existing) if existing.version >= HighlightStore::CURRENT_VERSION => {
+                        log::debug!(
+                            "Highlight rules config is up to date (version {})",
+                            existing.version
+                        );
+                        return;
+                    }
+                    Ok(existing) => {
+                        log::info!(
+                            "Upgrading highlight rules from version {} to {}",
+                            existing.version,
+                            HighlightStore::CURRENT_VERSION
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to parse existing highlight rules version: {}",
+                            error
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                log::warn!("Failed to read existing highlight rules: {}", error);
+            }
+        }
+    }
+
+    if let Err(error) = fs::write(&rules_path, DEFAULT_HIGHLIGHT_RULES) {
+        log::error!("Failed to write default highlight rules: {}", error);
+    } else {
+        log::info!("Installed default highlight rules to {:?}", rules_path);
+    }
+}
+
 /// GPUI Entity wrapping HighlightStore.
 pub struct HighlightStoreEntity {
     store: HighlightStore,
@@ -196,6 +256,8 @@ impl HighlightStoreEntity {
         if cx.try_global::<GlobalHighlightStore>().is_some() {
             return;
         }
+
+        ensure_default_highlights();
 
         let store =
             HighlightStore::load_from_file(paths::highlight_rules_file()).unwrap_or_else(|err| {

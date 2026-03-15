@@ -28,6 +28,12 @@ use script_runner::{ScriptRunner, ScriptStatus};
 const SCRIPT_PANEL_KEY: &str = "ScriptPanel";
 
 const BSPTERM_PY: &[u8] = include_bytes!("../../../assets/scripts/bspterm.py");
+const SCAN_MPU_IP_PY: &[u8] = include_bytes!("../../../assets/scripts/scan_mpu_ip.py");
+const DEVICE_ONLINE_NOTIFY_PY: &[u8] =
+    include_bytes!("../../../assets/scripts/device_online_notify.py");
+const DISP_BOA_PY: &[u8] = include_bytes!("../../../assets/scripts/disp_boa.py");
+const EXAMPLE_WITH_PARAMS_PY: &[u8] =
+    include_bytes!("../../../assets/scripts/example_with_params.py");
 
 fn scripts_dir() -> PathBuf {
     paths::config_dir().join("scripts")
@@ -41,14 +47,22 @@ fn ensure_default_scripts() {
         return;
     }
 
-    // Only install bspterm.py library file (Python SDK that must stay in sync with app version)
-    // User scripts are no longer auto-installed; use "Import Default Config" menu instead
-    let bspterm_path = scripts_dir.join("bspterm.py");
-    if let Err(e) = std::fs::write(&bspterm_path, BSPTERM_PY) {
-        log::error!("Failed to write bspterm.py: {}", e);
-    } else {
-        log::info!("Installed bspterm.py to {:?}", bspterm_path);
+    let official_scripts: &[(&str, &[u8])] = &[
+        ("bspterm.py", BSPTERM_PY),
+        ("scan_mpu_ip.py", SCAN_MPU_IP_PY),
+        ("device_online_notify.py", DEVICE_ONLINE_NOTIFY_PY),
+        ("disp_boa.py", DISP_BOA_PY),
+        ("example_with_params.py", EXAMPLE_WITH_PARAMS_PY),
+    ];
+
+    for (name, content) in official_scripts {
+        let path = scripts_dir.join(name);
+        if let Err(e) = std::fs::write(&path, content) {
+            log::error!("Failed to write {}: {}", name, e);
+        }
     }
+
+    log::info!("Installed official scripts to {:?}", scripts_dir);
 }
 
 pub fn init(cx: &mut App) {

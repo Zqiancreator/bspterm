@@ -72,8 +72,6 @@ actions!(
         OpenPerformanceProfiler,
         /// Opens the onboarding view.
         OpenOnboarding,
-        /// Imports default configuration from a ZIP file.
-        ImportDefaultConfig,
     ]
 );
 

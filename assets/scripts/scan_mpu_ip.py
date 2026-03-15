@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# [官方脚本] 此文件由 Bspterm 自动安装和更新，请勿修改。
+# 如需自定义，请复制到新文件后再修改。
 """
 NE5000E MPU IP Collector Script
 
