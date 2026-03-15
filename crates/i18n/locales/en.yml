@@ -145,6 +145,7 @@ common:
   disabled: "Disabled"
   clear: "Clear"
   enter_to_confirm: "Enter to Confirm"
+  all: "All"
 
 # Protocol names
 protocol:
@@ -295,7 +296,7 @@ rule_editor:
   action: "Action"
 
   # Triggers
-  trigger_wakeup: "Wakeup"
+  trigger_wakeup: "Always"
   trigger_connected: "Connected"
   trigger_disconnected: "Disconnected"
 
@@ -336,6 +337,7 @@ rule_edit:
   action_text: "Send Text"
   credential_username: "Username"
   credential_password: "Password"
+  exclude_user_input: "Exclude user input from matching"
   condition_pattern: "Pattern: {}"
   condition_protocol: "Protocol: {}"
   condition_all: "All ({} conditions)"

@@ -206,6 +206,27 @@ Fish-style autosuggestion in `terminal.rs` + `terminal_element.rs`. Shows ghost 
 - `is_bracketed_paste_mode()`: 检查 `TermMode::BRACKETED_PASTE` 标志，供 `terminal_view` 决定粘贴策略
 - 测试：`tests::paste_tests`（6 个用例），使用 `TerminalBuilder::new_display_only` 构建无 PTY 终端。`cargo test -p terminal test_paste -j 6`
 
+## 获取用户输入的正确方式
+
+**规则：需要获取「用户当前输入了什么」时，优先从终端网格读取，`current_line_buffer` 仅作降级。**
+
+`current_line_buffer` 是按键级追踪，无法感知 shell 的行替换行为（历史导航 Up/Down/Ctrl+P、Tab 补全、Ctrl+R 搜索等），会导致 buffer 内容与屏幕实际显示不一致。
+
+正确模式（已用于 `update_autosuggestion()` 和 `check_rules()`）：
+
+```rust
+let user_input = if let Some((_prompt, input)) = self.read_user_input_from_grid() {
+    input
+} else {
+    self.current_line_buffer.clone()
+};
+```
+
+- `read_user_input_from_grid()` — 读取网格 column 0 到 cursor column，通过 `extract_command_preserve_trailing()` 分离 prompt 和 user_input，不受 buffer 状态影响
+- `current_line_buffer` — 仅在网格无法识别 prompt 时降级使用（如连接初期、非标准 prompt）
+
+**适用场景：** 任何需要判断「用户输入内容」的功能（规则匹配的 `exclude_user_input`、缩写展开、自动补全等）都应使用此模式。仅在需要逐键实时响应（如 `current_word_buffer` 驱动的缩写触发）时才直接使用 buffer。
+
 ## Terminal Python Scripting
 
 Unix socket JSON-RPC in `crates/terminal_scripting/` and `crates/script_panel/`.

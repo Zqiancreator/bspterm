@@ -4959,12 +4959,20 @@ impl Terminal {
 
     /// Check automation rules for the given trigger event.
     fn check_rules(&mut self, trigger: rule_store::TriggerEvent, cx: &mut Context<Self>) {
-        let content = self.get_screen_content();
+        let cursor_line_content = self.get_cursor_line_content();
+        // Primary: read user input from grid (accurate after history nav, tab completion, etc.)
+        // Fallback: current_line_buffer when grid has no recognizable prompt
+        let user_input = if let Some((_prompt, input)) = self.read_user_input_from_grid() {
+            input
+        } else {
+            self.current_line_buffer.clone()
+        };
         let matched_actions = if let Some(engine) = &mut self.rule_engine {
-            engine.check(trigger.clone(), &content)
+            engine.check(trigger.clone(), &cursor_line_content, &user_input)
         } else {
             if !self.login_completed && trigger == rule_store::TriggerEvent::Wakeup {
-                if self.detect_shell_prompt(&content) {
+                let screen_content = self.get_screen_content();
+                if self.detect_shell_prompt(&screen_content) {
                     self.mark_login_completed(cx);
                 }
             }
@@ -4973,7 +4981,8 @@ impl Terminal {
 
         if matched_actions.is_empty() {
             if !self.login_completed && trigger == rule_store::TriggerEvent::Wakeup {
-                if self.detect_shell_prompt(&content) {
+                let screen_content = self.get_screen_content();
+                if self.detect_shell_prompt(&screen_content) {
                     self.mark_login_completed(cx);
                 }
             }
@@ -5000,6 +5009,21 @@ impl Terminal {
         }
 
         content
+    }
+
+    /// Get only the cursor line content for rule matching.
+    /// Rules should match against the cursor line rather than the full screen
+    /// to avoid re-triggering on old prompts that are still visible.
+    fn get_cursor_line_content(&self) -> String {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let cursor_line = grid.cursor.point.line;
+        let row = &grid[cursor_line];
+        let mut content = String::new();
+        for cell in row.into_iter() {
+            content.push(cell.c);
+        }
+        content.trim_end().to_string()
     }
 
     /// Execute a single rule action.

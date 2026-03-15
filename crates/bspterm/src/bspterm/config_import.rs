@@ -215,6 +215,7 @@ fn import_rules(config: &RuleStore, cx: &mut App) -> Result<()> {
                 max_triggers: rule.max_triggers,
                 condition: rule.condition.clone(),
                 action: rule.action.clone(),
+                exclude_user_input: rule.exclude_user_input,
             };
 
             store_entity.add_rule(new_rule, cx);

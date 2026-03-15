@@ -88,6 +88,8 @@ pub struct AutomationRule {
     pub max_triggers: Option<u32>,
     pub condition: RuleCondition,
     pub action: RuleAction,
+    #[serde(default = "default_true")]
+    pub exclude_user_input: bool,
 }
 
 impl ConfigItem for AutomationRule {
@@ -106,6 +108,7 @@ impl AutomationRule {
             max_triggers: None,
             condition,
             action,
+            exclude_user_input: true,
         }
     }
 
@@ -152,7 +155,7 @@ impl JsonConfigStore for RuleStore {
 }
 
 impl RuleStore {
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 3;
 
     pub fn new() -> Self {
         Self {
@@ -196,50 +199,54 @@ impl RuleStore {
     }
 }
 
-/// Default auto-login rules for Telnet connections.
+/// Default auto-login rules for SSH/Telnet connections.
 fn default_rules() -> Vec<AutomationRule> {
     vec![
         AutomationRule {
             id: Uuid::new_v4(),
-            name: "Telnet Username Prompt".to_string(),
+            name: "Auto Login - Username".to_string(),
             enabled: true,
             trigger: TriggerEvent::Wakeup,
-            max_triggers: Some(1),
-            condition: RuleCondition::All {
-                conditions: vec![
-                    RuleCondition::ConnectionType {
-                        protocol: Protocol::Telnet,
-                    },
-                    RuleCondition::Pattern {
-                        pattern: r"(?i)(username|login|user)\s*:".to_string(),
-                        case_insensitive: true,
-                    },
-                ],
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)(username|login|user)\s*:".to_string(),
+                case_insensitive: true,
             },
             action: RuleAction::SendCredential {
                 credential_type: CredentialType::Username,
             },
+            exclude_user_input: true,
         },
         AutomationRule {
             id: Uuid::new_v4(),
-            name: "Telnet Password Prompt".to_string(),
+            name: "Auto Login - Password".to_string(),
             enabled: true,
             trigger: TriggerEvent::Wakeup,
-            max_triggers: Some(1),
-            condition: RuleCondition::All {
-                conditions: vec![
-                    RuleCondition::ConnectionType {
-                        protocol: Protocol::Telnet,
-                    },
-                    RuleCondition::Pattern {
-                        pattern: r"(?i)password\s*:".to_string(),
-                        case_insensitive: true,
-                    },
-                ],
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)password\s*:".to_string(),
+                case_insensitive: true,
             },
             action: RuleAction::SendCredential {
                 credential_type: CredentialType::Password,
             },
+            exclude_user_input: true,
+        },
+        AutomationRule {
+            id: Uuid::new_v4(),
+            name: "SSH Fingerprint Accept".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)continue connecting.*\(yes/no".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendText {
+                text: "yes".to_string(),
+                append_newline: true,
+            },
+            exclude_user_input: true,
         },
     ]
 }
@@ -391,9 +398,13 @@ mod tests {
     #[test]
     fn test_default_rules() {
         let store = RuleStore::with_defaults();
-        assert_eq!(store.rules.len(), 2);
-        assert!(store.rules.iter().any(|r| r.name == "Telnet Username Prompt"));
-        assert!(store.rules.iter().any(|r| r.name == "Telnet Password Prompt"));
+        assert_eq!(store.rules.len(), 3);
+        assert!(store.rules.iter().any(|r| r.name == "Auto Login - Username"));
+        assert!(store.rules.iter().any(|r| r.name == "Auto Login - Password"));
+        assert!(store.rules.iter().any(|r| r.name == "SSH Fingerprint Accept"));
+        for rule in &store.rules {
+            assert!(rule.max_triggers.is_none());
+        }
     }
 
     #[test]

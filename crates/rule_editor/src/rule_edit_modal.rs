@@ -9,7 +9,7 @@ use terminal::{
     TriggerEvent,
 };
 use ui::{
-    prelude::*, Button, ButtonCommon, ButtonStyle, Label, LabelSize, h_flex, v_flex,
+    prelude::*, Button, ButtonCommon, ButtonStyle, Checkbox, Label, LabelSize, h_flex, v_flex,
 };
 use uuid::Uuid;
 use workspace::ModalView;
@@ -22,11 +22,12 @@ pub struct RuleEditModal {
     send_text_editor: Entity<Editor>,
     trigger: TriggerEvent,
     max_triggers: Option<u32>,
-    protocol: Protocol,
+    protocol: Option<Protocol>,
     case_insensitive: bool,
     action_type: ActionType,
     credential_type: CredentialType,
     append_newline: bool,
+    exclude_user_input: bool,
     focus_handle: FocusHandle,
 }
 
@@ -70,12 +71,13 @@ impl RuleEditModal {
             pattern_editor,
             send_text_editor,
             trigger: TriggerEvent::Wakeup,
-            max_triggers: Some(1),
-            protocol: Protocol::Telnet,
+            max_triggers: None,
+            protocol: None,
             case_insensitive: true,
             action_type: ActionType::SendCredential,
             credential_type: CredentialType::Username,
             append_newline: true,
+            exclude_user_input: true,
             focus_handle,
         }
     }
@@ -124,6 +126,7 @@ impl RuleEditModal {
             action_type,
             credential_type,
             append_newline,
+            exclude_user_input: rule.exclude_user_input,
             focus_handle,
         }
     }
@@ -133,16 +136,21 @@ impl RuleEditModal {
         let pattern = self.pattern_editor.read(cx).text(cx);
         let send_text = self.send_text_editor.read(cx).text(cx);
 
-        let condition = RuleCondition::All {
-            conditions: vec![
-                RuleCondition::ConnectionType {
-                    protocol: self.protocol.clone(),
-                },
-                RuleCondition::Pattern {
-                    pattern,
-                    case_insensitive: self.case_insensitive,
-                },
-            ],
+        let pattern_condition = RuleCondition::Pattern {
+            pattern,
+            case_insensitive: self.case_insensitive,
+        };
+
+        let condition = match &self.protocol {
+            Some(protocol) => RuleCondition::All {
+                conditions: vec![
+                    RuleCondition::ConnectionType {
+                        protocol: protocol.clone(),
+                    },
+                    pattern_condition,
+                ],
+            },
+            None => pattern_condition,
         };
 
         let action = match self.action_type {
@@ -158,6 +166,7 @@ impl RuleEditModal {
         if let Some(id) = self.editing_rule_id {
             let trigger = self.trigger.clone();
             let max_triggers = self.max_triggers;
+            let exclude_user_input = self.exclude_user_input;
             self.rule_store.update(cx, |store, cx| {
                 store.update_rule(id, |rule| {
                     rule.name = name;
@@ -165,6 +174,7 @@ impl RuleEditModal {
                     rule.max_triggers = max_triggers;
                     rule.condition = condition;
                     rule.action = action;
+                    rule.exclude_user_input = exclude_user_input;
                 }, cx);
             });
         } else {
@@ -176,6 +186,7 @@ impl RuleEditModal {
                 max_triggers: self.max_triggers,
                 condition,
                 action,
+                exclude_user_input: self.exclude_user_input,
             };
             self.rule_store.update(cx, |store, cx| {
                 store.add_rule(rule, cx);
@@ -194,7 +205,7 @@ impl RuleEditModal {
         cx.notify();
     }
 
-    fn set_protocol(&mut self, protocol: Protocol, cx: &mut Context<Self>) {
+    fn set_protocol(&mut self, protocol: Option<Protocol>, cx: &mut Context<Self>) {
         self.protocol = protocol;
         cx.notify();
     }
@@ -210,20 +221,20 @@ impl RuleEditModal {
     }
 }
 
-fn extract_condition(condition: &RuleCondition) -> (Protocol, String, bool) {
-    let mut protocol = Protocol::Telnet;
+fn extract_condition(condition: &RuleCondition) -> (Option<Protocol>, String, bool) {
+    let mut protocol: Option<Protocol> = None;
     let mut pattern = String::new();
     let mut case_insensitive = true;
 
     fn extract_recursive(
         condition: &RuleCondition,
-        protocol: &mut Protocol,
+        protocol: &mut Option<Protocol>,
         pattern: &mut String,
         case_insensitive: &mut bool,
     ) {
         match condition {
             RuleCondition::ConnectionType { protocol: p } => {
-                *protocol = p.clone();
+                *protocol = Some(p.clone());
             }
             RuleCondition::Pattern { pattern: p, case_insensitive: ci } => {
                 *pattern = p.clone();
@@ -335,25 +346,36 @@ impl Render for RuleEditModal {
                                 h_flex()
                                     .gap_1()
                                     .child(
-                                        Button::new("protocol-telnet", "Telnet")
-                                            .style(if protocol == Protocol::Telnet {
+                                        Button::new("protocol-all", t("common.all"))
+                                            .style(if protocol.is_none() {
                                                 ButtonStyle::Filled
                                             } else {
                                                 ButtonStyle::Subtle
                                             })
                                             .on_click(cx.listener(|this, _, _window, cx| {
-                                                this.set_protocol(Protocol::Telnet, cx);
+                                                this.set_protocol(None, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("protocol-telnet", "Telnet")
+                                            .style(if protocol == Some(Protocol::Telnet) {
+                                                ButtonStyle::Filled
+                                            } else {
+                                                ButtonStyle::Subtle
+                                            })
+                                            .on_click(cx.listener(|this, _, _window, cx| {
+                                                this.set_protocol(Some(Protocol::Telnet), cx);
                                             })),
                                     )
                                     .child(
                                         Button::new("protocol-ssh", "SSH")
-                                            .style(if protocol == Protocol::Ssh {
+                                            .style(if protocol == Some(Protocol::Ssh) {
                                                 ButtonStyle::Filled
                                             } else {
                                                 ButtonStyle::Subtle
                                             })
                                             .on_click(cx.listener(|this, _, _window, cx| {
-                                                this.set_protocol(Protocol::Ssh, cx);
+                                                this.set_protocol(Some(Protocol::Ssh), cx);
                                             })),
                                     ),
                             ),
@@ -371,6 +393,22 @@ impl Render for RuleEditModal {
                             .px_2()
                             .py_1()
                             .child(self.pattern_editor.clone()),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_1()
+                            .gap_1()
+                            .child(
+                                Checkbox::new(
+                                    "exclude-user-input",
+                                    self.exclude_user_input.into(),
+                                )
+                                .label(t("rule_edit.exclude_user_input"))
+                                .on_click(cx.listener(|this, _, _window, cx| {
+                                    this.exclude_user_input = !this.exclude_user_input;
+                                    cx.notify();
+                                })),
+                            ),
                     ),
             )
             .child(

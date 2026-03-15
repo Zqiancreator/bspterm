@@ -114,8 +114,15 @@ impl RuleEngine {
     }
 
     /// Check rules for the given trigger event and screen content.
+    /// `current_line_buffer` is the user's current input on the cursor line,
+    /// used to strip user input from matching when `exclude_user_input` is enabled.
     /// Returns a list of actions to execute.
-    pub fn check(&mut self, trigger: TriggerEvent, screen_content: &str) -> Vec<MatchedAction> {
+    pub fn check(
+        &mut self,
+        trigger: TriggerEvent,
+        screen_content: &str,
+        current_line_buffer: &str,
+    ) -> Vec<MatchedAction> {
         let mut actions = Vec::new();
         let now = Instant::now();
 
@@ -139,10 +146,16 @@ impl RuleEngine {
                 }
             }
 
+            let content_to_match = if rule.exclude_user_input {
+                strip_user_input(screen_content, current_line_buffer)
+            } else {
+                screen_content.to_string()
+            };
+
             if self.matches_condition(
                 &rule.condition,
                 &compiled_rule.compiled_patterns,
-                screen_content,
+                &content_to_match,
             ) {
                 *self.trigger_counts.entry(rule.id).or_insert(0) += 1;
                 self.last_trigger_times.insert(rule.id, now);
@@ -201,6 +214,19 @@ impl RuleEngine {
     }
 }
 
+/// Strip user input from the end of the cursor line content.
+/// If `line_buffer` is empty or doesn't match the suffix, returns the original content.
+fn strip_user_input(cursor_line: &str, line_buffer: &str) -> String {
+    if line_buffer.is_empty() {
+        return cursor_line.to_string();
+    }
+    if let Some(stripped) = cursor_line.strip_suffix(line_buffer) {
+        stripped.to_string()
+    } else {
+        cursor_line.to_string()
+    }
+}
+
 /// A matched action ready to be executed.
 #[derive(Clone, Debug)]
 pub struct MatchedAction {
@@ -223,7 +249,6 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
     fn make_ssh_connection_info() -> ConnectionInfo {
         ConnectionInfo::Ssh {
             host: "192.168.1.1".to_string(),
@@ -253,14 +278,15 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "Please enter login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "Please enter login:", "");
         assert_eq!(actions.len(), 1);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "No prompt here");
+        let actions = engine.check(TriggerEvent::Wakeup, "No prompt here", "");
         assert_eq!(actions.len(), 0);
     }
 
@@ -281,16 +307,17 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "LOGIN:");
+        let actions = engine.check(TriggerEvent::Wakeup, "LOGIN:", "");
         assert_eq!(actions.len(), 1);
 
         std::thread::sleep(Duration::from_millis(2100));
 
-        let actions = engine.check(TriggerEvent::Wakeup, "Login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "Login:", "");
         assert_eq!(actions.len(), 1);
     }
 
@@ -319,6 +346,7 @@ mod tests {
                     text: "test".to_string(),
                     append_newline: true,
                 },
+                exclude_user_input: true,
             },
             AutomationRule {
                 id: Uuid::new_v4(),
@@ -341,12 +369,13 @@ mod tests {
                     text: "ssh_test".to_string(),
                     append_newline: true,
                 },
+                exclude_user_input: true,
             },
         ];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "Enter prompt:");
+        let actions = engine.check(TriggerEvent::Wakeup, "Enter prompt:", "");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].rule_name, "Telnet Only");
     }
@@ -368,16 +397,17 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
         assert_eq!(actions.len(), 1);
 
         std::thread::sleep(Duration::from_millis(2100));
 
-        let actions = engine.check(TriggerEvent::Wakeup, "login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
         assert_eq!(actions.len(), 0);
     }
 
@@ -398,14 +428,15 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "anything");
+        let actions = engine.check(TriggerEvent::Wakeup, "anything", "");
         assert_eq!(actions.len(), 0);
 
-        let actions = engine.check(TriggerEvent::Connected, "anything");
+        let actions = engine.check(TriggerEvent::Connected, "anything", "");
         assert_eq!(actions.len(), 1);
     }
 
@@ -441,11 +472,12 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
         assert_eq!(actions.len(), 0);
     }
 
@@ -474,16 +506,17 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "Enter username:");
+        let actions = engine.check(TriggerEvent::Wakeup, "Enter username:", "");
         assert_eq!(actions.len(), 1);
 
         std::thread::sleep(Duration::from_millis(2100));
 
-        let actions = engine.check(TriggerEvent::Wakeup, "Enter login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "Enter login:", "");
         assert_eq!(actions.len(), 1);
     }
 
@@ -504,16 +537,294 @@ mod tests {
                 text: "test".to_string(),
                 append_newline: true,
             },
+            exclude_user_input: true,
         }];
 
         let mut engine = RuleEngine::new(&conn_info, &rules);
 
-        let actions = engine.check(TriggerEvent::Wakeup, "login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
         assert_eq!(actions.len(), 1);
 
         engine.reset_counts();
 
-        let actions = engine.check(TriggerEvent::Wakeup, "login:");
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
         assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn test_ssh_auto_login_rules() {
+        let conn_info = make_ssh_connection_info();
+        let rules = vec![
+            AutomationRule {
+                id: Uuid::new_v4(),
+                name: "Auto Login - Username".to_string(),
+                enabled: true,
+                trigger: TriggerEvent::Wakeup,
+                max_triggers: None,
+                condition: RuleCondition::Pattern {
+                    pattern: r"(?i)(username|login|user)\s*:".to_string(),
+                    case_insensitive: true,
+                },
+                action: RuleAction::SendCredential {
+                    credential_type: CredentialType::Username,
+                },
+                exclude_user_input: true,
+            },
+            AutomationRule {
+                id: Uuid::new_v4(),
+                name: "Auto Login - Password".to_string(),
+                enabled: true,
+                trigger: TriggerEvent::Wakeup,
+                max_triggers: None,
+                condition: RuleCondition::Pattern {
+                    pattern: r"(?i)password\s*:".to_string(),
+                    case_insensitive: true,
+                },
+                action: RuleAction::SendCredential {
+                    credential_type: CredentialType::Password,
+                },
+                exclude_user_input: true,
+            },
+        ];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].rule_name, "Auto Login - Username");
+        assert_eq!(
+            engine.get_credential(&CredentialType::Username),
+            Some("root".to_string())
+        );
+
+        std::thread::sleep(Duration::from_millis(2100));
+
+        let actions = engine.check(TriggerEvent::Wakeup, "Password:", "");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].rule_name, "Auto Login - Password");
+        assert_eq!(
+            engine.get_credential(&CredentialType::Password),
+            Some("password".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fingerprint_accept_rule() {
+        let conn_info = make_ssh_connection_info();
+        let rules = vec![AutomationRule {
+            id: Uuid::new_v4(),
+            name: "SSH Fingerprint Accept".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)continue connecting.*\(yes/no".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendText {
+                text: "yes".to_string(),
+                append_newline: true,
+            },
+            exclude_user_input: true,
+        }];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        let actions = engine.check(
+            TriggerEvent::Wakeup,
+            "Are you sure you want to continue connecting (yes/no)?",
+            "",
+        );
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].rule_name, "SSH Fingerprint Accept");
+
+        std::thread::sleep(Duration::from_millis(2100));
+
+        let actions = engine.check(
+            TriggerEvent::Wakeup,
+            "Are you sure you want to continue connecting (yes/no/[fingerprint])?",
+            "",
+        );
+        assert_eq!(actions.len(), 1);
+
+        std::thread::sleep(Duration::from_millis(2100));
+
+        let actions = engine.check(TriggerEvent::Wakeup, "normal output without fingerprint", "");
+        assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_no_max_triggers_fires_repeatedly() {
+        let conn_info = make_telnet_connection_info();
+        let rules = vec![AutomationRule {
+            id: Uuid::new_v4(),
+            name: "Unlimited".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: "login:".to_string(),
+                case_insensitive: false,
+            },
+            action: RuleAction::SendText {
+                text: "test".to_string(),
+                append_newline: true,
+            },
+            exclude_user_input: true,
+        }];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
+        assert_eq!(actions.len(), 1);
+
+        std::thread::sleep(Duration::from_millis(2100));
+
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
+        assert_eq!(actions.len(), 1);
+
+        std::thread::sleep(Duration::from_millis(2100));
+
+        let actions = engine.check(TriggerEvent::Wakeup, "login:", "");
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn test_protocol_agnostic_rules() {
+        let rule = AutomationRule {
+            id: Uuid::new_v4(),
+            name: "Protocol Agnostic".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)(username|login|user)\s*:".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendCredential {
+                credential_type: CredentialType::Username,
+            },
+            exclude_user_input: true,
+        };
+
+        let telnet_info = make_telnet_connection_info();
+        let mut telnet_engine = RuleEngine::new(&telnet_info, std::slice::from_ref(&rule));
+        let actions = telnet_engine.check(TriggerEvent::Wakeup, "Username:", "");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            telnet_engine.get_credential(&CredentialType::Username),
+            Some("admin".to_string())
+        );
+
+        let ssh_info = make_ssh_connection_info();
+        let mut ssh_engine = RuleEngine::new(&ssh_info, std::slice::from_ref(&rule));
+        let actions = ssh_engine.check(TriggerEvent::Wakeup, "Username:", "");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            ssh_engine.get_credential(&CredentialType::Username),
+            Some("root".to_string())
+        );
+    }
+
+    #[test]
+    fn test_exclude_user_input_strips_echo() {
+        let conn_info = make_ssh_connection_info();
+        let rules = vec![AutomationRule {
+            id: Uuid::new_v4(),
+            name: "Password Rule".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)password\s*:".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendCredential {
+                credential_type: CredentialType::Password,
+            },
+            exclude_user_input: true,
+        }];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        // User typed "cat /etc/passwd" and the cursor line shows the echo.
+        // With exclude_user_input, the user input is stripped, leaving just the prompt.
+        let actions = engine.check(
+            TriggerEvent::Wakeup,
+            "$ cat /etc/passwd",
+            "cat /etc/passwd",
+        );
+        assert_eq!(actions.len(), 0, "should not match when user input contains 'password'");
+    }
+
+    #[test]
+    fn test_exclude_user_input_empty_buffer_matches_normally() {
+        let conn_info = make_ssh_connection_info();
+        let rules = vec![AutomationRule {
+            id: Uuid::new_v4(),
+            name: "Password Rule".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)password\s*:".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendCredential {
+                credential_type: CredentialType::Password,
+            },
+            exclude_user_input: true,
+        }];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        // Empty buffer means server prompt, should match normally
+        let actions = engine.check(TriggerEvent::Wakeup, "Password:", "");
+        assert_eq!(actions.len(), 1, "should match server password prompt with empty buffer");
+    }
+
+    #[test]
+    fn test_exclude_user_input_disabled_matches_full_content() {
+        let conn_info = make_ssh_connection_info();
+        let rules = vec![AutomationRule {
+            id: Uuid::new_v4(),
+            name: "Password Rule".to_string(),
+            enabled: true,
+            trigger: TriggerEvent::Wakeup,
+            max_triggers: None,
+            condition: RuleCondition::Pattern {
+                pattern: r"(?i)password\s*:".to_string(),
+                case_insensitive: true,
+            },
+            action: RuleAction::SendCredential {
+                credential_type: CredentialType::Password,
+            },
+            exclude_user_input: false,
+        }];
+
+        let mut engine = RuleEngine::new(&conn_info, &rules);
+
+        // With exclude_user_input=false, matches against full content including user echo
+        let actions = engine.check(
+            TriggerEvent::Wakeup,
+            "$ grep password: config.txt",
+            "grep password: config.txt",
+        );
+        assert_eq!(actions.len(), 1, "should match full content when exclude_user_input is false");
+    }
+
+    #[test]
+    fn test_strip_user_input_function() {
+        // Empty buffer returns original
+        assert_eq!(strip_user_input("Password:", ""), "Password:");
+
+        // Matching suffix is stripped
+        assert_eq!(strip_user_input("$ cat /etc/passwd", "cat /etc/passwd"), "$ ");
+
+        // Non-matching suffix returns original
+        assert_eq!(strip_user_input("Password:", "something_else"), "Password:");
+
+        // Full match (user typed everything on the line)
+        assert_eq!(strip_user_input("cat /etc/passwd", "cat /etc/passwd"), "");
     }
 }

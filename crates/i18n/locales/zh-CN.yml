@@ -145,6 +145,7 @@ common:
   disabled: "已禁用"
   clear: "清除"
   enter_to_confirm: "回车确认"
+  all: "全部"
 
 # Protocol names
 protocol:
@@ -295,7 +296,7 @@ rule_editor:
   action: "动作"
 
   # Triggers
-  trigger_wakeup: "唤醒"
+  trigger_wakeup: "始终触发"
   trigger_connected: "已连接"
   trigger_disconnected: "已断开"
 
@@ -336,6 +337,7 @@ rule_edit:
   action_text: "发送文本"
   credential_username: "用户名"
   credential_password: "密码"
+  exclude_user_input: "匹配时排除用户输入"
   condition_pattern: "模式: {}"
   condition_protocol: "协议: {}"
   condition_all: "全部 ({} 个条件)"

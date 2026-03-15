@@ -1,55 +1,57 @@
 {
-  "version": 1,
+  "version": 3,
   "rules": [
     {
       "id": "00000000-0000-0000-0000-000000000001",
-      "name": "Telnet Username Prompt",
+      "name": "Auto Login - Username",
       "enabled": true,
       "trigger": "wakeup",
-      "max_triggers": 1,
+      "max_triggers": null,
       "condition": {
-        "type": "all",
-        "conditions": [
-          {
-            "type": "connection_type",
-            "protocol": "telnet"
-          },
-          {
-            "type": "pattern",
-            "pattern": "(?i)(username|login|user)\\s*:",
-            "case_insensitive": true
-          }
-        ]
+        "type": "pattern",
+        "pattern": "(?i)(username|login|user)\\s*:",
+        "case_insensitive": true
       },
       "action": {
         "type": "send_credential",
         "credential_type": "username"
-      }
+      },
+      "exclude_user_input": true
     },
     {
       "id": "00000000-0000-0000-0000-000000000002",
-      "name": "Telnet Password Prompt",
+      "name": "Auto Login - Password",
       "enabled": true,
       "trigger": "wakeup",
-      "max_triggers": 1,
+      "max_triggers": null,
       "condition": {
-        "type": "all",
-        "conditions": [
-          {
-            "type": "connection_type",
-            "protocol": "telnet"
-          },
-          {
-            "type": "pattern",
-            "pattern": "(?i)password\\s*:",
-            "case_insensitive": true
-          }
-        ]
+        "type": "pattern",
+        "pattern": "(?i)password\\s*:",
+        "case_insensitive": true
       },
       "action": {
         "type": "send_credential",
         "credential_type": "password"
-      }
+      },
+      "exclude_user_input": true
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "name": "SSH Fingerprint Accept",
+      "enabled": true,
+      "trigger": "wakeup",
+      "max_triggers": null,
+      "condition": {
+        "type": "pattern",
+        "pattern": "(?i)continue connecting.*\\(yes/no",
+        "case_insensitive": true
+      },
+      "action": {
+        "type": "send_text",
+        "text": "yes",
+        "append_newline": true
+      },
+      "exclude_user_input": true
     }
   ]
 }
