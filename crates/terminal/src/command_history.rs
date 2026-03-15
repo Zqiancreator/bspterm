@@ -43,6 +43,25 @@ impl CommandHistory {
         self.commands.clear();
     }
 
+    /// Adds a command directly to the history (used when Enter is pressed).
+    pub fn add_command(
+        &mut self,
+        command_text: String,
+        prompt: String,
+        line: i32,
+        timestamp: DateTime<Local>,
+    ) {
+        if command_text.trim().is_empty() {
+            return;
+        }
+        self.commands.push(TerminalCommand {
+            command_text,
+            prompt,
+            line,
+            timestamp: Some(timestamp),
+        });
+    }
+
     /// Processes a line of terminal output, extracting any command if present.
     /// Returns true if a new command was extracted.
     pub fn process_line(
@@ -69,10 +88,22 @@ impl CommandHistory {
     /// scroll_delta is the number of lines that scrolled up (positive = scrolled up).
     pub fn adjust_for_scroll(&mut self, scroll_delta: i32, topmost_line: i32) {
         if scroll_delta > 0 {
+            let count_before = self.commands.len();
             for cmd in &mut self.commands {
                 cmd.line -= scroll_delta;
             }
             self.commands.retain(|cmd| cmd.line >= topmost_line);
+            let count_after = self.commands.len();
+            log::info!(
+                "[outline-debug] command_history adjust_for_scroll: scroll_delta={}, topmost_line={}, commands_before={}, commands_after={}",
+                scroll_delta, topmost_line, count_before, count_after,
+            );
+            for (i, cmd) in self.commands.iter().enumerate().take(5) {
+                log::debug!(
+                    "[outline-debug]   command[{}]: line={}, text={:?}",
+                    i, cmd.line, cmd.command_text,
+                );
+            }
         }
     }
 
@@ -96,7 +127,8 @@ fn prompt_patterns() -> &'static [Regex] {
             // Huawei system/sub-view: [DeviceName] or [DeviceName-xxx]
             // e.g., "[Huawei]interface GigabitEthernet0/0/1"
             // e.g., "[Huawei-GigabitEthernet0/0/1]ip address 192.168.1.1 24"
-            Regex::new(r"^(\[[^\[\]]+\])(.+)$").unwrap(),
+            // Exclude @ and whitespace to avoid matching Unix prompts like [user@host ~]
+            Regex::new(r"^(\[[^\[\]@\s]+\])(.+)$").unwrap(),
             // Cisco configuration modes: Router(config)#, Router(config-if)#
             // e.g., "Router(config)#hostname R1"
             Regex::new(r"^(.*\([^()]+\)[#>])\s*(.+)$").unwrap(),

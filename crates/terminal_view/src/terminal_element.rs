@@ -18,7 +18,7 @@ use terminal::{
     TerminalContent, TerminalLanguageServer, compute_hex_group_tokens, default_token_color,
     alacritty_terminal::{
         grid::Dimensions,
-        index::Point as AlacPoint,
+        index::{Column as AlacColumn, Line as AlacLine, Point as AlacPoint},
         term::{TermMode, cell::Flags},
         vte::ansi::{
             Color::{self as AnsiColor, Named},
@@ -1762,6 +1762,30 @@ impl Element for TerminalElement {
                     let number_highlight_color = gpui::hsla(45.0 / 360.0, 0.8, 0.5, 0.35);
                     relative_highlighted_ranges
                         .push((hovered_number.parsed.word_match.clone(), number_highlight_color));
+                }
+
+                // Add outline jump highlight
+                if let Some(highlighted_line) = self.terminal.read(cx).highlighted_line {
+                    let relative_line = highlighted_line + display_offset as i32;
+                    let columns = self
+                        .terminal
+                        .read(cx)
+                        .last_content
+                        .terminal_bounds
+                        .num_columns();
+                    log::info!(
+                        "[outline-debug] render highlight: highlighted_line={}, display_offset={}, relative_line={}, viewport_lines={}",
+                        highlighted_line, display_offset, relative_line,
+                        self.terminal.read(cx).viewport_lines(),
+                    );
+                    let highlight_color = gpui::hsla(210.0 / 360.0, 0.6, 0.5, 0.3);
+                    let start =
+                        AlacPoint::new(AlacLine(relative_line), AlacColumn(0));
+                    let end = AlacPoint::new(
+                        AlacLine(relative_line),
+                        AlacColumn(columns.saturating_sub(1)),
+                    );
+                    relative_highlighted_ranges.push((start..=end, highlight_color));
                 }
 
                 // then have that representation be converted to the appropriate highlight data structure

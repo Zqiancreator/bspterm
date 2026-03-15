@@ -558,6 +558,7 @@ impl TerminalBuilder {
             reconnected_while_unfocused: false,
             autosuggestion: None,
             autosuggestion_needs_update: false,
+            highlighted_line: None,
         };
 
         Ok(TerminalBuilder {
@@ -812,6 +813,7 @@ impl TerminalBuilder {
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
+                highlighted_line: None,
             };
 
             if !activation_script.is_empty() && no_task {
@@ -1035,6 +1037,7 @@ impl TerminalBuilder {
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
+                highlighted_line: None,
             };
 
             terminal.init_rule_engine();
@@ -1225,6 +1228,7 @@ impl TerminalBuilder {
                 reconnected_while_unfocused: false,
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
+                highlighted_line: None,
             };
 
             terminal.init_rule_engine();
@@ -1410,6 +1414,7 @@ impl TerminalBuilder {
             reconnected_while_unfocused: false,
             autosuggestion: None,
             autosuggestion_needs_update: false,
+            highlighted_line: None,
         };
 
         terminal.init_rule_engine();
@@ -1673,6 +1678,8 @@ pub struct Terminal {
     /// When true, autosuggestion will be recalculated on the next Wakeup event
     /// (after the grid has been updated with PTY echo).
     autosuggestion_needs_update: bool,
+    /// Line to highlight temporarily (absolute line number, used by outline jump).
+    pub highlighted_line: Option<i32>,
 }
 
 struct CopyTemplate {
@@ -1806,10 +1813,7 @@ impl Terminal {
                     }
                 }
 
-                let commands_changed = self.record_output_timestamps();
-                if commands_changed {
-                    cx.emit(Event::CommandHistoryChanged);
-                }
+                self.record_output_timestamps();
 
                 self.check_rules(rule_store::TriggerEvent::Wakeup, cx);
 
@@ -2334,32 +2338,15 @@ impl Terminal {
             .push_back(InternalEvent::Scroll(AlacScroll::Bottom));
     }
 
-    /// Scrolls the terminal view to make the specified line visible.
-    /// The line number can be negative for scrollback history.
+    /// Scrolls the terminal view to make the specified line visible,
+    /// positioning it near the top of the viewport (2 lines from top).
     pub fn scroll_to_line(&mut self, target_line: i32) {
         let term = self.term.lock();
         let current_display_offset = self.last_content.display_offset as i32;
-        let screen_lines = term.screen_lines() as i32;
 
-        // Calculate what line is currently at the top of the visible area
-        // display_offset of 0 means we're at the bottom (showing the most recent lines)
-        // Higher display_offset means we've scrolled up into history
-        let current_top_line = -current_display_offset;
-
-        // We want target_line to be visible. Calculate the needed display_offset.
-        // If target_line is above current view, scroll up (increase display_offset)
-        // If target_line is below current view, scroll down (decrease display_offset)
-
-        // Check if target_line is already visible
-        let current_bottom_line = current_top_line + screen_lines - 1;
-        if target_line >= current_top_line && target_line <= current_bottom_line {
-            // Already visible, no scroll needed
-            return;
-        }
-
-        // Calculate new display_offset to put target_line in the middle of the screen
-        let middle_offset = screen_lines / 2;
-        let new_display_offset = -(target_line - middle_offset);
+        // Position target_line 2 rows from the top of the viewport
+        let top_margin = 2;
+        let new_display_offset = -(target_line - top_margin);
 
         // Clamp to valid range
         let history_size = term.history_size() as i32;
@@ -2369,10 +2356,24 @@ impl Terminal {
         let delta = clamped_offset - current_display_offset;
         drop(term);
 
+        log::info!(
+            "[outline-debug] scroll_to_line: target_line={}, current_display_offset={}, new_display_offset={}, history_size={}, clamped_offset={}, delta={}",
+            target_line, current_display_offset, new_display_offset, history_size, clamped_offset, delta,
+        );
+
         if delta != 0 {
             self.events
                 .push_back(InternalEvent::Scroll(AlacScroll::Delta(delta)));
         }
+    }
+
+    pub fn set_highlighted_line(&mut self, line: i32) {
+        self.highlighted_line = Some(line);
+        log::info!("[outline-debug] set_highlighted_line: line={}", line);
+    }
+
+    pub fn clear_highlighted_line(&mut self) {
+        self.highlighted_line = None;
     }
 
     pub fn scrolled_to_top(&self) -> bool {
@@ -2629,23 +2630,53 @@ impl Terminal {
             // Check if this is Enter key
             let is_enter = input_bytes.iter().any(|&b| b == b'\r' || b == b'\n');
 
-            // For Enter, record command to suggestion history BEFORE buffers get cleared
+            // For Enter, record command to suggestion history and per-terminal
+            // command history BEFORE buffers get cleared
             if is_enter {
                 // Primary: read from grid (accurate even after Tab completion)
-                let command = if let Some((_prompt, input)) = self.read_user_input_from_grid() {
-                    if input.trim().is_empty() { None } else { Some(input) }
+                let grid_result = self.read_user_input_from_grid();
+                let captured = if let Some((prompt, input)) = grid_result {
+                    if input.trim().is_empty() {
+                        None
+                    } else {
+                        Some((prompt, input))
+                    }
                 } else if !self.current_line_buffer.trim().is_empty() {
-                    // Fallback: use current_line_buffer
-                    Some(self.current_line_buffer.trim().to_string())
+                    Some((String::new(), self.current_line_buffer.trim().to_string()))
                 } else {
                     None
                 };
-                if let Some(command) = command {
+                if let Some((prompt, command)) = captured {
+                    // 1. Add to global suggestion history (existing)
                     if let Some(history_entity) = SuggestionHistoryEntity::try_global(cx) {
                         history_entity.update(cx, |history, cx| {
-                            history.add_command(command, cx);
+                            history.add_command(command.clone(), cx);
                         });
                     }
+
+                    // 2. Add to per-terminal command history
+                    let cursor_line = {
+                        let term = self.term.lock();
+                        term.grid().cursor.point.line.0
+                    };
+                    self.command_history.add_command(
+                        command.trim().to_string(),
+                        prompt,
+                        cursor_line,
+                        Local::now(),
+                    );
+                    {
+                        let term = self.term.lock();
+                        log::info!(
+                            "[outline-debug] command recorded: command={:?}, cursor_line={}, topmost_line={}, history_size={}, display_offset={}",
+                            command.trim(),
+                            cursor_line,
+                            term.topmost_line().0,
+                            term.history_size(),
+                            self.last_content.display_offset,
+                        );
+                    }
+                    cx.emit(Event::CommandHistoryChanged);
                 }
             }
 
@@ -3449,8 +3480,7 @@ impl Terminal {
     /// When content scrolls (topmost_line becomes more negative), we adjust all
     /// timestamp keys by the scroll delta so they continue to match their content.
     ///
-    /// Returns true if new commands were detected.
-    fn record_output_timestamps(&mut self) -> bool {
+    fn record_output_timestamps(&mut self) {
         let term = self.term.lock();
         let grid = term.grid();
         let cursor_line = grid.cursor.point.line.0;
@@ -3460,6 +3490,10 @@ impl Terminal {
         // Detect scrolling: topmost_line becoming more negative means content scrolled up
         let scroll_delta = self.last_topmost_line - topmost_line;
         if scroll_delta > 0 {
+            log::info!(
+                "[outline-debug] adjust_for_scroll: scroll_delta={}, topmost_line={}, last_topmost_line={}",
+                scroll_delta, topmost_line, self.last_topmost_line,
+            );
             // Content scrolled up by scroll_delta lines, adjust all timestamp keys
             self.line_timestamps = self
                 .line_timestamps
@@ -3472,7 +3506,7 @@ impl Terminal {
             self.command_history.adjust_for_scroll(scroll_delta, topmost_line);
         }
 
-        // Collect lines to process for command extraction
+        // Collect lines to record timestamps for
         let lines_to_check: Vec<i32> = if cursor_line != self.last_cursor_line {
             let (start, end) = if cursor_line > self.last_cursor_line {
                 (self.last_cursor_line, cursor_line)
@@ -3489,21 +3523,6 @@ impl Terminal {
             self.line_timestamps.insert(line, now);
         }
 
-        // Extract commands from newly updated lines
-        let mut commands_changed = false;
-        for &line in &lines_to_check {
-            if line >= topmost_line && line <= grid.bottommost_line().0 {
-                let row = &grid[Line(line)];
-                let content = row_to_string(row);
-                let trimmed = content.trim_end();
-                if !trimmed.is_empty() {
-                    if self.command_history.process_line(trimmed, line, Some(now)) {
-                        commands_changed = true;
-                    }
-                }
-            }
-        }
-
         // Update tracking state
         self.last_cursor_line = cursor_line;
         self.last_topmost_line = topmost_line;
@@ -3512,8 +3531,6 @@ impl Terminal {
         self.line_timestamps
             .retain(|&line, _| line >= topmost_line);
         self.command_history.cleanup_old_commands(topmost_line);
-
-        commands_changed
     }
 
     pub fn get_line_timestamp(&self, line: i32) -> Option<DateTime<Local>> {

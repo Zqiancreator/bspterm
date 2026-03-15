@@ -18464,6 +18464,7 @@ dependencies = [
  "bspterm_actions",
  "gpui",
  "i18n",
+ "log",
  "terminal",
  "terminal_view",
  "ui",

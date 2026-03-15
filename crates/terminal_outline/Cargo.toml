@@ -17,6 +17,7 @@ anyhow.workspace = true
 bspterm_actions.workspace = true
 gpui.workspace = true
 i18n.workspace = true
+log.workspace = true
 terminal.workspace = true
 terminal_view.workspace = true
 ui.workspace = true

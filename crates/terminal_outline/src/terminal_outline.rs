@@ -1,11 +1,12 @@
 use std::ops::Range;
+use std::time::Duration;
 
 use anyhow::Result;
 use bspterm_actions::terminal_outline::ToggleFocus;
 use gpui::{
     Action, AnyElement, App, AsyncWindowContext, ClickEvent, Context, Entity, EventEmitter,
     FocusHandle, Focusable, IntoElement, ListSizingBehavior, ParentElement, Pixels, Render,
-    SharedString, Styled, Subscription, UniformListScrollHandle, WeakEntity, Window, div, px,
+    SharedString, Styled, Subscription, Task, UniformListScrollHandle, WeakEntity, Window, div, px,
     uniform_list,
 };
 use i18n::t;
@@ -42,7 +43,9 @@ pub struct TerminalOutline {
     scroll_handle: UniformListScrollHandle,
     selected_index: Option<usize>,
     width: Option<Pixels>,
-    _subscriptions: Vec<Subscription>,
+    _workspace_subscription: Subscription,
+    _terminal_subscription: Option<Subscription>,
+    highlight_clear_task: Option<Task<()>>,
 }
 
 impl TerminalOutline {
@@ -71,7 +74,9 @@ impl TerminalOutline {
             scroll_handle: UniformListScrollHandle::new(),
             selected_index: None,
             width: None,
-            _subscriptions: vec![workspace_subscription],
+            _workspace_subscription: workspace_subscription,
+            _terminal_subscription: None,
+            highlight_clear_task: None,
         };
 
         // Defer initial terminal check to after construction completes,
@@ -114,12 +119,14 @@ impl TerminalOutline {
             };
 
             if should_update {
-                let subscription = cx.subscribe(&terminal, |this, terminal, event, cx| {
-                    if let TerminalEvent::CommandHistoryChanged = event {
-                        this.update_entries_from_terminal(&terminal, cx);
-                    }
-                });
-                self._subscriptions.push(subscription);
+                self._terminal_subscription = Some(cx.subscribe(
+                    &terminal,
+                    |this, terminal, event, cx| {
+                        if let TerminalEvent::CommandHistoryChanged = event {
+                            this.update_entries_from_terminal(&terminal, cx);
+                        }
+                    },
+                ));
 
                 self.active_terminal = Some(terminal.clone());
                 self.update_entries_from_terminal(&terminal, cx);
@@ -142,11 +149,26 @@ impl TerminalOutline {
         cx.notify();
     }
 
-    fn scroll_to_command(&self, line: i32, _window: &mut Window, cx: &mut Context<Self>) {
+    fn scroll_to_command(&mut self, line: i32, _window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("[outline-debug] scroll_to_command: line={}", line);
         if let Some(terminal) = &self.active_terminal {
             terminal.update(cx, |terminal, _cx| {
                 terminal.scroll_to_line(line);
+                terminal.set_highlighted_line(line);
             });
+
+            // Cancel previous clear task if rapidly clicking
+            self.highlight_clear_task.take();
+            let terminal = terminal.clone();
+            self.highlight_clear_task = Some(cx.spawn(async move |_this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(1500))
+                    .await;
+                terminal.update(cx, |terminal, _cx| {
+                    terminal.clear_highlighted_line();
+                });
+            }));
+
             cx.notify();
         }
     }
