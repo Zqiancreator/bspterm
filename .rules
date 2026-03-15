@@ -109,6 +109,29 @@ All entity/UI work on foreground thread.
 
 `.on_click(|event, window, cx: &mut App| ...)` — use `cx.listener(|this, event, window, cx| ...)` to update entity.
 
+### Focus 与 `on_focus_out` 陷阱
+
+`on_focus_out` 依赖 `previous_focus_path` 包含当前元素的 focus_id。Focus path 由 `Frame::focus_path()` 从渲染后的 `DispatchTree` 计算。**如果在同一更新周期内创建元素并立即 focus，该元素的 focus handle 尚未经过完整的「渲染→提交→交换帧」周期，不会出现在 `DispatchTree` 中，导致后续 `is_focus_out` 检测失败——用户点击其他地方时 `on_focus_out` 不触发。**
+
+**解决方案：** 用 `window.on_next_frame` 将 focus 操作延迟到下一帧，确保元素已渲染进 dispatch tree：
+
+```rust
+// 错误：同一帧内创建 + focus，on_focus_out 不会触发
+self.switch_to_tab(new_index, window, cx);
+self.start_rename_tab(new_index, window, cx); // 内部会 focus rename editor
+
+// 正确：延迟到下一帧
+self.switch_to_tab(new_index, window, cx);
+let entity = cx.entity();
+window.on_next_frame(move |window, cx| {
+    entity.update(cx, |this, cx| {
+        this.start_rename_tab(new_index, window, cx);
+    });
+});
+```
+
+**适用场景：** 任何在程序控制下（非用户交互触发）创建新 UI 元素并立即 focus 的情况，例如：新建 tab 后自动进入重命名、动态创建 inline editor 等。用户交互触发的 focus（如点击）不受影响，因为点击发生时元素已在 dispatch tree 中。
+
 ### Drag and Drop
 
 **Pitfall:** `on_drag_move` fires for ALL handlers (Capture phase). Always check `event.bounds.contains(&event.event.position)`.

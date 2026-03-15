@@ -1247,6 +1247,7 @@
     "bindings": {
       "cmd-enter": "command_panel::Send",
       "cmd-l": "command_panel::Clear",
+      "f2": "command_panel::RenameTab",
     },
   },
 ]

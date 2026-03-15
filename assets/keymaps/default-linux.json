@@ -1119,7 +1119,8 @@
     "context": "CommandPanel > Editor",
     "bindings": {
       "ctrl-enter": "command_panel::Send",
-      "ctrl-l": "command_panel::Clear"
+      "ctrl-l": "command_panel::Clear",
+      "f2": "command_panel::RenameTab"
     }
   }
 ]

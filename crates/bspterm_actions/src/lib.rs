@@ -435,7 +435,9 @@ pub mod command_panel {
             /// Starts cycle send in the command panel.
             StartCycleSend,
             /// Stops cycle send in the command panel.
-            StopCycleSend
+            StopCycleSend,
+            /// Renames the current user tab in the command panel.
+            RenameTab
         ]
     );
 }

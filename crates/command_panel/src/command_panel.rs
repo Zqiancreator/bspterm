@@ -1,13 +1,13 @@
 use anyhow::Result;
 use bspterm_actions::command_panel::{
-    AddTab, Clear, CloseTab, Send, StartCycleSend, StopCycleSend, ToggleFocus,
+    AddTab, Clear, CloseTab, RenameTab, Send, StartCycleSend, StopCycleSend, ToggleFocus,
 };
 use collections::HashMap;
 use editor::{Editor, EditorEvent, EditorMode, HighlightKey, MultiBuffer, ToPoint};
 use gpui::{
     Action, App, ClickEvent, Context, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
-    FontStyle, HighlightStyle, IntoElement, MouseButton, Pixels, Render, Styled, Subscription,
-    Task, WeakEntity, Window, px,
+    FontStyle, HighlightStyle, IntoElement, MouseButton, Pixels, Render, SharedString, Styled,
+    Subscription, Task, WeakEntity, Window, px,
 };
 use i18n::t;
 use language::Buffer;
@@ -25,6 +25,25 @@ use workspace::{
     Event as WorkspaceEvent, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
 };
+
+#[derive(Clone)]
+struct DraggedCommandTab {
+    index: usize,
+    label: SharedString,
+}
+
+impl Render for DraggedCommandTab {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .bg(cx.theme().colors().element_active)
+            .rounded_md()
+            .shadow_md()
+            .opacity(0.8)
+            .child(Label::new(self.label.clone()).size(LabelSize::Small))
+    }
+}
 
 const COMMAND_PANEL_KEY: &str = "CommandPanel";
 const DEFAULT_CYCLE_INTERVAL_MS: u64 = 5000;
@@ -80,6 +99,7 @@ pub struct CommandPanel {
     cycle_running: bool,
     renaming_tab: Option<usize>,
     rename_editor: Option<Entity<Editor>>,
+    rename_focus_subscription: Option<Subscription>,
     save_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -176,6 +196,7 @@ impl CommandPanel {
             cycle_running: false,
             renaming_tab: None,
             rename_editor: None,
+            rename_focus_subscription: None,
             save_task: None,
             _subscriptions: subscriptions,
         }
@@ -583,6 +604,14 @@ impl CommandPanel {
 
         let new_index = self.tabs.len() - 1;
         self.switch_to_tab(new_index, window, cx);
+        // Delay rename to next frame so the tab's focus handle is in the dispatch tree,
+        // otherwise on_focus_out won't fire when the user clicks away.
+        let entity = cx.entity();
+        window.on_next_frame(move |window, cx| {
+            entity.update(cx, |this, cx| {
+                this.start_rename_tab(new_index, window, cx);
+            });
+        });
         self.schedule_save(cx);
     }
 
@@ -605,6 +634,31 @@ impl CommandPanel {
         }
 
         self.tabs[self.active_tab_index].editor.focus_handle(cx).focus(window, cx);
+        self.schedule_save(cx);
+        cx.notify();
+    }
+
+    fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from < 2 || to < 2 || from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+            return;
+        }
+        if !matches!(self.tabs[from].kind, CommandTabKind::UserTab { .. })
+            || !matches!(self.tabs[to].kind, CommandTabKind::UserTab { .. })
+        {
+            return;
+        }
+
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+
+        if self.active_tab_index == from {
+            self.active_tab_index = to;
+        } else if from < self.active_tab_index && to >= self.active_tab_index {
+            self.active_tab_index -= 1;
+        } else if from > self.active_tab_index && to <= self.active_tab_index {
+            self.active_tab_index += 1;
+        }
+
         self.schedule_save(cx);
         cx.notify();
     }
@@ -634,13 +688,20 @@ impl CommandPanel {
             editor
         });
 
-        rename_editor.focus_handle(cx).focus(window, cx);
+        let rename_focus_handle = rename_editor.focus_handle(cx);
+        let focus_subscription = cx.on_focus_out(&rename_focus_handle, window, |this, _, window, cx| {
+            this.commit_rename(window, cx);
+        });
+
+        rename_focus_handle.focus(window, cx);
         self.renaming_tab = Some(index);
         self.rename_editor = Some(rename_editor);
+        self.rename_focus_subscription = Some(focus_subscription);
         cx.notify();
     }
 
     fn commit_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rename_focus_subscription = None;
         let Some(index) = self.renaming_tab.take() else {
             return;
         };
@@ -663,6 +724,7 @@ impl CommandPanel {
     }
 
     fn cancel_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rename_focus_subscription = None;
         self.renaming_tab = None;
         self.rename_editor = None;
         self.tabs[self.active_tab_index].editor.focus_handle(cx).focus(window, cx);
@@ -826,6 +888,7 @@ impl CommandPanel {
                     );
                 }
             } else {
+                let drag_label = label.clone();
                 let mut tab_button = h_flex()
                     .id(("tab", index))
                     .px_2()
@@ -856,13 +919,34 @@ impl CommandPanel {
                 );
 
                 if is_user_tab {
-                    tab_button = tab_button.on_click(
-                        cx.listener(move |this, event: &ClickEvent, window, cx| {
-                            if event.click_count() == 2 {
-                                this.start_rename_tab(index, window, cx);
-                            }
-                        }),
-                    );
+                    tab_button = tab_button
+                        .on_drag(
+                            DraggedCommandTab {
+                                index,
+                                label: drag_label,
+                            },
+                            |dragged, _, _, cx| {
+                                cx.new(|_| DraggedCommandTab {
+                                    index: dragged.index,
+                                    label: dragged.label.clone(),
+                                })
+                            },
+                        )
+                        .drag_over::<DraggedCommandTab>(|style, _, _, _| {
+                            style.bg(gpui::opaque_grey(0.5, 0.2))
+                        })
+                        .on_drop(
+                            cx.listener(move |this, dragged: &DraggedCommandTab, _window, cx| {
+                                this.move_tab(dragged.index, index, cx);
+                            }),
+                        )
+                        .on_click(
+                            cx.listener(move |this, event: &ClickEvent, window, cx| {
+                                if event.click_count() == 2 {
+                                    this.start_rename_tab(index, window, cx);
+                                }
+                            }),
+                        );
 
                     let tab_element = tab_button.into_any_element();
                     let panel_handle = cx.weak_entity();
@@ -1083,6 +1167,12 @@ impl Render for CommandPanel {
             }))
             .on_action(cx.listener(|this, _: &StopCycleSend, window, cx| {
                 this.stop_cycle_send(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &RenameTab, window, cx| {
+                let index = this.active_tab_index;
+                if matches!(this.tabs[index].kind, CommandTabKind::UserTab { .. }) {
+                    this.start_rename_tab(index, window, cx);
+                }
             }))
             .child(self.render_hint_bar(cx))
             .child(
