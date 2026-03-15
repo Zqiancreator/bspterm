@@ -1766,7 +1766,8 @@ impl Element for TerminalElement {
 
                 // Add outline jump highlight
                 if let Some(highlighted_line) = self.terminal.read(cx).highlighted_line {
-                    let relative_line = highlighted_line + display_offset as i32;
+                    let grid_line = self.terminal.read(cx).absolute_to_grid_line(highlighted_line);
+                    let relative_line = grid_line + display_offset as i32;
                     let columns = self
                         .terminal
                         .read(cx)
@@ -1774,8 +1775,8 @@ impl Element for TerminalElement {
                         .terminal_bounds
                         .num_columns();
                     log::info!(
-                        "[outline-debug] render highlight: highlighted_line={}, display_offset={}, relative_line={}, viewport_lines={}",
-                        highlighted_line, display_offset, relative_line,
+                        "[outline-debug] render highlight: absolute_line={}, grid_line={}, display_offset={}, relative_line={}, viewport_lines={}",
+                        highlighted_line, grid_line, display_offset, relative_line,
                         self.terminal.read(cx).viewport_lines(),
                     );
                     let highlight_color = gpui::hsla(210.0 / 360.0, 0.6, 0.5, 0.3);

@@ -552,6 +552,7 @@ impl TerminalBuilder {
             line_timestamps: HashMap::default(),
             last_cursor_line: 0,
             last_topmost_line: 0,
+            total_lines_scrolled: 0,
             command_history: CommandHistory::new(),
             session_logger: None,
             last_user_input_time: None,
@@ -807,6 +808,7 @@ impl TerminalBuilder {
                 line_timestamps: HashMap::default(),
                 last_cursor_line: 0,
                 last_topmost_line: 0,
+                total_lines_scrolled: 0,
                 command_history: CommandHistory::new(),
                 session_logger: None,
                 last_user_input_time: None,
@@ -1031,6 +1033,7 @@ impl TerminalBuilder {
                 line_timestamps: HashMap::default(),
                 last_cursor_line: 0,
                 last_topmost_line: 0,
+                total_lines_scrolled: 0,
                 command_history: CommandHistory::new(),
                 session_logger: None,
                 last_user_input_time: None,
@@ -1222,6 +1225,7 @@ impl TerminalBuilder {
                 line_timestamps: HashMap::default(),
                 last_cursor_line: 0,
                 last_topmost_line: 0,
+                total_lines_scrolled: 0,
                 command_history: CommandHistory::new(),
                 session_logger: None,
                 last_user_input_time: None,
@@ -1408,6 +1412,7 @@ impl TerminalBuilder {
             line_timestamps: HashMap::default(),
             last_cursor_line: 0,
             last_topmost_line: 0,
+            total_lines_scrolled: 0,
             command_history: CommandHistory::new(),
             session_logger: None,
             last_user_input_time: None,
@@ -1663,6 +1668,9 @@ pub struct Terminal {
     last_cursor_line: i32,
     /// Tracks the last known topmost line to detect scrolling
     last_topmost_line: i32,
+    /// Total number of lines that have scrolled off the top since terminal creation.
+    /// Used to compute stable absolute line numbers for command history.
+    total_lines_scrolled: i64,
     /// Command history extracted from terminal output
     command_history: CommandHistory,
     /// Session logger for saving terminal output to files
@@ -1679,7 +1687,7 @@ pub struct Terminal {
     /// (after the grid has been updated with PTY echo).
     autosuggestion_needs_update: bool,
     /// Line to highlight temporarily (absolute line number, used by outline jump).
-    pub highlighted_line: Option<i32>,
+    pub highlighted_line: Option<i64>,
 }
 
 struct CopyTemplate {
@@ -2338,15 +2346,26 @@ impl Terminal {
             .push_back(InternalEvent::Scroll(AlacScroll::Bottom));
     }
 
-    /// Scrolls the terminal view to make the specified line visible,
+    /// Converts a grid-relative line number to a stable absolute line number.
+    pub fn grid_line_to_absolute(&self, grid_line: i32) -> i64 {
+        grid_line as i64 + self.total_lines_scrolled
+    }
+
+    /// Converts a stable absolute line number back to a grid-relative line number.
+    pub fn absolute_to_grid_line(&self, absolute_line: i64) -> i32 {
+        (absolute_line - self.total_lines_scrolled) as i32
+    }
+
+    /// Scrolls the terminal view to make the specified absolute line visible,
     /// positioning it near the top of the viewport (2 lines from top).
-    pub fn scroll_to_line(&mut self, target_line: i32) {
+    pub fn scroll_to_line(&mut self, absolute_line: i64) {
+        let grid_line = self.absolute_to_grid_line(absolute_line);
         let term = self.term.lock();
         let current_display_offset = self.last_content.display_offset as i32;
 
-        // Position target_line 2 rows from the top of the viewport
+        // Position grid_line 2 rows from the top of the viewport
         let top_margin = 2;
-        let new_display_offset = -(target_line - top_margin);
+        let new_display_offset = -(grid_line - top_margin);
 
         // Clamp to valid range
         let history_size = term.history_size() as i32;
@@ -2357,8 +2376,8 @@ impl Terminal {
         drop(term);
 
         log::info!(
-            "[outline-debug] scroll_to_line: target_line={}, current_display_offset={}, new_display_offset={}, history_size={}, clamped_offset={}, delta={}",
-            target_line, current_display_offset, new_display_offset, history_size, clamped_offset, delta,
+            "[outline-debug] scroll_to_line: absolute_line={}, grid_line={}, current_display_offset={}, new_display_offset={}, history_size={}, clamped_offset={}, delta={}",
+            absolute_line, grid_line, current_display_offset, new_display_offset, history_size, clamped_offset, delta,
         );
 
         if delta != 0 {
@@ -2367,9 +2386,9 @@ impl Terminal {
         }
     }
 
-    pub fn set_highlighted_line(&mut self, line: i32) {
+    pub fn set_highlighted_line(&mut self, line: i64) {
         self.highlighted_line = Some(line);
-        log::info!("[outline-debug] set_highlighted_line: line={}", line);
+        log::info!("[outline-debug] set_highlighted_line: absolute_line={}", line);
     }
 
     pub fn clear_highlighted_line(&mut self) {
@@ -2655,23 +2674,25 @@ impl Terminal {
                     }
 
                     // 2. Add to per-terminal command history
-                    let cursor_line = {
+                    let absolute_line = {
                         let term = self.term.lock();
-                        term.grid().cursor.point.line.0
+                        let cursor_line = term.grid().cursor.point.line.0;
+                        self.grid_line_to_absolute(cursor_line)
                     };
                     self.command_history.add_command(
                         command.trim().to_string(),
                         prompt,
-                        cursor_line,
+                        absolute_line,
                         Local::now(),
                     );
                     {
                         let term = self.term.lock();
                         log::info!(
-                            "[outline-debug] command recorded: command={:?}, cursor_line={}, topmost_line={}, history_size={}, display_offset={}",
+                            "[outline-debug] command recorded: command={:?}, absolute_line={}, topmost_line={}, total_lines_scrolled={}, history_size={}, display_offset={}",
                             command.trim(),
-                            cursor_line,
+                            absolute_line,
                             term.topmost_line().0,
+                            self.total_lines_scrolled,
                             term.history_size(),
                             self.last_content.display_offset,
                         );
@@ -3491,9 +3512,11 @@ impl Terminal {
         let scroll_delta = self.last_topmost_line - topmost_line;
         if scroll_delta > 0 {
             log::info!(
-                "[outline-debug] adjust_for_scroll: scroll_delta={}, topmost_line={}, last_topmost_line={}",
-                scroll_delta, topmost_line, self.last_topmost_line,
+                "[outline-debug] scroll detected: scroll_delta={}, topmost_line={}, last_topmost_line={}, total_lines_scrolled={}",
+                scroll_delta, topmost_line, self.last_topmost_line, self.total_lines_scrolled,
             );
+            // Track total lines scrolled for absolute line number computation
+            self.total_lines_scrolled += scroll_delta as i64;
             // Content scrolled up by scroll_delta lines, adjust all timestamp keys
             self.line_timestamps = self
                 .line_timestamps
@@ -3502,8 +3525,6 @@ impl Terminal {
                 .collect();
             // Also adjust last_cursor_line to match the shifted content
             self.last_cursor_line -= scroll_delta;
-            // Adjust command history line numbers
-            self.command_history.adjust_for_scroll(scroll_delta, topmost_line);
         }
 
         // Collect lines to record timestamps for
@@ -3530,7 +3551,7 @@ impl Terminal {
         // Clean up timestamps that have scrolled out of history
         self.line_timestamps
             .retain(|&line, _| line >= topmost_line);
-        self.command_history.cleanup_old_commands(topmost_line);
+        self.command_history.cleanup_old_commands(self.grid_line_to_absolute(topmost_line));
     }
 
     pub fn get_line_timestamp(&self, line: i32) -> Option<DateTime<Local>> {

@@ -149,8 +149,8 @@ impl TerminalOutline {
         cx.notify();
     }
 
-    fn scroll_to_command(&mut self, line: i32, _window: &mut Window, cx: &mut Context<Self>) {
-        log::info!("[outline-debug] scroll_to_command: line={}", line);
+    fn scroll_to_command(&mut self, line: i64, _window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("[outline-debug] scroll_to_command: absolute_line={}", line);
         if let Some(terminal) = &self.active_terminal {
             terminal.update(cx, |terminal, _cx| {
                 terminal.scroll_to_line(line);

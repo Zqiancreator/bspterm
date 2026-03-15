@@ -14,8 +14,8 @@ pub struct TerminalCommand {
     pub command_text: String,
     /// The full prompt prefix (e.g., "[Huawei-aaa]", "root@host:~$").
     pub prompt: String,
-    /// The line number in the terminal grid (can be negative for scrollback).
-    pub line: i32,
+    /// Absolute line number (stable across scrolling).
+    pub line: i64,
     /// The timestamp when this command was executed.
     pub timestamp: Option<DateTime<Local>>,
 }
@@ -48,7 +48,7 @@ impl CommandHistory {
         &mut self,
         command_text: String,
         prompt: String,
-        line: i32,
+        line: i64,
         timestamp: DateTime<Local>,
     ) {
         if command_text.trim().is_empty() {
@@ -67,7 +67,7 @@ impl CommandHistory {
     pub fn process_line(
         &mut self,
         line_content: &str,
-        line_number: i32,
+        line_number: i64,
         timestamp: Option<DateTime<Local>>,
     ) -> bool {
         if let Some((prompt, command)) = extract_command(line_content) {
@@ -84,32 +84,9 @@ impl CommandHistory {
         false
     }
 
-    /// Adjusts line numbers when terminal content scrolls.
-    /// scroll_delta is the number of lines that scrolled up (positive = scrolled up).
-    pub fn adjust_for_scroll(&mut self, scroll_delta: i32, topmost_line: i32) {
-        if scroll_delta > 0 {
-            let count_before = self.commands.len();
-            for cmd in &mut self.commands {
-                cmd.line -= scroll_delta;
-            }
-            self.commands.retain(|cmd| cmd.line >= topmost_line);
-            let count_after = self.commands.len();
-            log::info!(
-                "[outline-debug] command_history adjust_for_scroll: scroll_delta={}, topmost_line={}, commands_before={}, commands_after={}",
-                scroll_delta, topmost_line, count_before, count_after,
-            );
-            for (i, cmd) in self.commands.iter().enumerate().take(5) {
-                log::debug!(
-                    "[outline-debug]   command[{}]: line={}, text={:?}",
-                    i, cmd.line, cmd.command_text,
-                );
-            }
-        }
-    }
-
-    /// Removes commands whose line numbers are below the given threshold.
-    pub fn cleanup_old_commands(&mut self, topmost_line: i32) {
-        self.commands.retain(|cmd| cmd.line >= topmost_line);
+    /// Removes commands whose absolute line numbers are below the given threshold.
+    pub fn cleanup_old_commands(&mut self, min_absolute_line: i64) {
+        self.commands.retain(|cmd| cmd.line >= min_absolute_line);
     }
 }
 
@@ -580,33 +557,17 @@ mod tests {
     }
 
     #[test]
-    fn test_command_history_scroll_adjustment() {
-        let mut history = CommandHistory::new();
-        let now = Local::now();
-
-        history.process_line("user@host:~$ cmd1", 0, Some(now));
-        history.process_line("user@host:~$ cmd2", 5, Some(now));
-        history.process_line("user@host:~$ cmd3", 10, Some(now));
-
-        // Simulate scrolling up by 3 lines
-        history.adjust_for_scroll(3, -100);
-
-        assert_eq!(history.commands()[0].line, -3);
-        assert_eq!(history.commands()[1].line, 2);
-        assert_eq!(history.commands()[2].line, 7);
-    }
-
-    #[test]
     fn test_command_history_cleanup() {
         let mut history = CommandHistory::new();
         let now = Local::now();
 
-        history.process_line("user@host:~$ cmd1", -10, Some(now));
-        history.process_line("user@host:~$ cmd2", -5, Some(now));
-        history.process_line("user@host:~$ cmd3", 0, Some(now));
+        // Use absolute line numbers (always non-negative, monotonically increasing)
+        history.process_line("user@host:~$ cmd1", 100, Some(now));
+        history.process_line("user@host:~$ cmd2", 200, Some(now));
+        history.process_line("user@host:~$ cmd3", 300, Some(now));
 
-        // Clean up commands that scrolled past line -7
-        history.cleanup_old_commands(-7);
+        // Clean up commands with absolute line below 150
+        history.cleanup_old_commands(150);
 
         assert_eq!(history.commands().len(), 2);
         assert_eq!(history.commands()[0].command_text, "cmd2");
