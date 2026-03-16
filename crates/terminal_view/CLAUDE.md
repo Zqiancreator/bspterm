@@ -10,7 +10,7 @@ src/
 ├── terminal_element.rs     # Low-level GPUI element for terminal grid
 ├── terminal_panel.rs       # Dockable panel for terminal panes
 ├── abbr_bar.rs             # Command abbreviation bar UI
-├── button_bar.rs           # Custom button bar with script execution
+├── button_bar.rs           # Custom button bar with script execution (@params modal support)
 ├── shortcut_bar.rs         # System action shortcuts panel
 ├── ssh_connect_modal.rs    # SSH connection setup dialog
 ├── terminal_scrollbar.rs   # Scrollbar state management

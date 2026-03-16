@@ -617,16 +617,26 @@ impl AddShortcutModal {
         let template = format!(
             r#"#!/usr/bin/env python3
 """
-{} - Terminal shortcut script
+{} - 终端自动化脚本
+
+# 如需传参，取消下方注释，运行时会弹出参数填写窗口
+# 参数在脚本中通过 params.参数名 访问
+#
+# @params
+# - para1: string
+#   description: 参数1
+#   required: true
+#   default: ""
+# @end_params
 """
 from bspterm import current_terminal
 
 def main():
     term = current_terminal()
-    # Add your automation logic here
-    # term.send("command\n")
-    # term.wait_for("pattern")
-    # output = term.run("command")
+    # 在此编写你的自动化逻辑
+    # term.send("命令\n")       # 发送命令
+    # term.wait_for("模式")     # 等待输出匹配
+    # output = term.run("命令") # 执行命令并返回输出
 
 if __name__ == "__main__":
     main()

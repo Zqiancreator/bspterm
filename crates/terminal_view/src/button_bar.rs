@@ -260,12 +260,31 @@ impl ButtonBarConfigModal {
         cx.spawn_in(window, async move |_, cx| {
             let python_lang = language_registry.language_for_name("Python").await.ok();
 
-            let template = r#"from bspterm import current_terminal
+            let template = r#"#!/usr/bin/env python3
+"""
+终端自动化脚本
 
-term = current_terminal()
-# 在此编写你的脚本逻辑
-output = term.run("ls -la")
-print(output)
+# 如需传参，取消下方注释，运行时会弹出参数填写窗口
+# 参数在脚本中通过 params.参数名 访问
+#
+# @params
+# - para1: string
+#   description: 参数1
+#   required: true
+#   default: ""
+# @end_params
+"""
+from bspterm import current_terminal
+
+def main():
+    term = current_terminal()
+    # 在此编写你的自动化逻辑
+    # term.send("命令\n")       # 发送命令
+    # term.wait_for("模式")     # 等待输出匹配
+    # output = term.run("命令") # 执行命令并返回输出
+
+if __name__ == "__main__":
+    main()
 "#;
             workspace.update_in(cx, |workspace, window, cx| {
                 let buffer = project.update(cx, |project, cx| {

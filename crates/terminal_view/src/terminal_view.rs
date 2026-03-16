@@ -1511,7 +1511,7 @@ print(output)
         });
     }
 
-    fn run_button_script(&mut self, button_id: uuid::Uuid, _window: &mut Window, cx: &mut Context<Self>) {
+    fn run_button_script(&mut self, button_id: uuid::Uuid, window: &mut Window, cx: &mut Context<Self>) {
         let Some(store) = ButtonBarStoreEntity::try_global(cx) else {
             return;
         };
@@ -1527,17 +1527,107 @@ print(output)
             return;
         };
 
-        // Stop any currently running script
+        let expanded_path = shellexpand::tilde(&button.script_path.to_string_lossy()).into_owned();
+
+        // Check if script has @params
+        let has_params = std::fs::read_to_string(&expanded_path)
+            .ok()
+            .and_then(|content| {
+                script_panel::script_params::ScriptParams::parse_from_script(&content)
+            })
+            .is_some_and(|params| !params.is_empty());
+
+        if has_params {
+            let workspace = self.workspace.clone();
+            let terminal_view = cx.entity().downgrade();
+            let script_path = button.script_path.clone();
+            let button_name = button.label.clone();
+
+            if let Some(workspace) = workspace.upgrade() {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, move |window, cx| {
+                        let content = std::fs::read_to_string(
+                            shellexpand::tilde(&script_path.to_string_lossy()).as_ref(),
+                        )
+                        .unwrap_or_default();
+                        let params =
+                            script_panel::script_params::ScriptParams::parse_from_script(&content)
+                                .unwrap_or_default();
+
+                        let on_run = Box::new(
+                            move |script_path: PathBuf,
+                                  env_params: std::collections::HashMap<String, String>,
+                                  cx: &mut App| {
+                                if let Some(view) = terminal_view.upgrade() {
+                                    view.update(cx, |this, cx| {
+                                        this.run_button_script_with_params(
+                                            script_path, env_params, cx,
+                                        );
+                                    });
+                                }
+                            },
+                        );
+
+                        script_panel::script_params_modal::ScriptParamsModal::new(
+                            button_name,
+                            script_path,
+                            params,
+                            on_run,
+                            window,
+                            cx,
+                        )
+                    });
+                });
+            }
+        } else {
+            // Stop any currently running script
+            if let Some(runner) = &mut self.button_bar_runner {
+                runner.stop();
+            }
+
+            let terminal_id = self.scripting_id.map(|id| id.to_string());
+            let mut runner = ButtonBarScriptRunner::new(
+                PathBuf::from(expanded_path),
+                connection_info.to_env_string(),
+                terminal_id,
+            );
+
+            if let Err(err) = runner.start() {
+                log::error!("Failed to start button bar script: {}", err);
+                self.show_script_error(&err.to_string(), cx);
+                return;
+            }
+
+            self.button_bar_runner = Some(runner);
+            cx.notify();
+        }
+    }
+
+    fn run_button_script_with_params(
+        &mut self,
+        script_path: PathBuf,
+        env_params: std::collections::HashMap<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection_info) = ScriptingServer::get(cx) else {
+            let err_msg = t("script.service_unavailable");
+            log::error!("Scripting server not available for button bar script");
+            self.show_script_error(&err_msg, cx);
+            return;
+        };
+
         if let Some(runner) = &mut self.button_bar_runner {
             runner.stop();
         }
 
         let terminal_id = self.scripting_id.map(|id| id.to_string());
-        let script_path = shellexpand::tilde(&button.script_path.to_string_lossy()).into_owned();
-        let mut runner = ButtonBarScriptRunner::new(
-            PathBuf::from(script_path),
+        let expanded_path = shellexpand::tilde(&script_path.to_string_lossy()).into_owned();
+
+        let mut runner = ButtonBarScriptRunner::new_with_params(
+            PathBuf::from(expanded_path),
             connection_info.to_env_string(),
             terminal_id,
+            env_params,
         );
 
         if let Err(err) = runner.start() {
