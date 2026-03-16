@@ -378,20 +378,6 @@ script:
   invalid_id: "无效的脚本 ID"
   shortcut_not_found: "未找到脚本快捷方式"
 
-# Abbreviation Bar
-abbr:
-  config_title: "缩写配置"
-  enable_expansion: "启用缩写展开"
-  empty_hint: "暂无缩写，点击下方按钮添加"
-  add_title: "添加缩写"
-  edit_title: "编辑缩写"
-  trigger_word: "触发词"
-  expansion_text: "展开内容"
-  applicable_protocol: "适用协议"
-  trigger_placeholder: "触发词 (如: g)"
-  expansion_placeholder: "展开内容 (如: git)"
-  label: "缩写"
-
 # Function Bar
 function:
   label: "函数"
@@ -482,9 +468,6 @@ welcome:
   automation_rules_desc: "回显满足条件时自动触发"
   python_scripts: "Python脚本"
   python_scripts_desc: "原生支持Python脚本"
-  abbreviations: "命令缩写"
-  abbreviations_desc: "支持常用命令缩写"
-
   # Features section
   ai_agent: "AI Agent"
   ai_agent_desc: "支持AI Agent自动化操作"

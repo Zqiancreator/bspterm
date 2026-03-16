@@ -254,12 +254,6 @@ pub fn terminal_rules_file() -> &'static PathBuf {
     TERMINAL_RULES_FILE.get_or_init(|| config_dir().join("terminal_rules.json"))
 }
 
-/// Returns the path to the `abbreviations.json` file for terminal abbreviation configurations.
-pub fn abbreviations_file() -> &'static PathBuf {
-    static ABBREVIATIONS_FILE: OnceLock<PathBuf> = OnceLock::new();
-    ABBREVIATIONS_FILE.get_or_init(|| config_dir().join("abbreviations.json"))
-}
-
 /// Returns the path to the `functions.json` file for terminal function configurations.
 pub fn functions_file() -> &'static PathBuf {
     static FUNCTIONS_FILE: OnceLock<PathBuf> = OnceLock::new();

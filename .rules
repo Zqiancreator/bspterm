@@ -171,7 +171,6 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Remote Explorer**: `crates/remote_explorer` — session tree with Quick Add (`src/quick_add/`), filter by name/tags/host/username (auto-expands groups when filtering)
 - **Reconnection**: Preserves scrollback by reusing `Terminal` entity and `events_tx` — `Term` buffer is never replaced
 - **Editor Panel**: `crates/editor_panel` — dockable editor wrapping a `Pane`, auto-closes when empty
-- **Abbreviations**: `abbr_store.rs` + `abbr_bar.rs` — trigger word expansion, protocol-scoped (All/Ssh/Telnet)
 - **Function Bar**: `function_store.rs` + `function_bar.rs` — custom buttons with parameter UI modal (string/number/boolean/choice/password types)
 - **Button Bar @params**: `button_bar.rs` — `run_button_script()` detects `@params` in scripts and shows `ScriptParamsModal`; without params, executes directly. Same modal flow as function bar's `execute_function_from_bar()`
 - **Unified Script Template**: Button bar, function bar, and shortcut bar share the same default Python template with shebang, Chinese comments, commented-out `@params` block, and `main()` function
@@ -246,7 +245,7 @@ Regex-based highlighting in `crates/terminal/src/highlight_rule.rs`, `highlight_
 
 ## Terminal Config Store Pattern
 
-Common pattern via `crates/terminal/src/config_store.rs`: `ConfigItem` trait (`fn id() -> Uuid`) + `JsonConfigStore` trait (load/save/CRUD/move). Stores: `AbbreviationStore`, `FunctionStore`, `RuleStore`, `HighlightStore`, `ButtonBarStore`. Each has a GPUI Entity wrapper with Global marker, event emission, and async save scheduling.
+Common pattern via `crates/terminal/src/config_store.rs`: `ConfigItem` trait (`fn id() -> Uuid`) + `JsonConfigStore` trait (load/save/CRUD/move). Stores: `FunctionStore`, `RuleStore`, `HighlightStore`, `ButtonBarStore`. Each has a GPUI Entity wrapper with Global marker, event emission, and async save scheduling.
 
 ## Agent Connection Fallback
 

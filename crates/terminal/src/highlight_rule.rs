@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::abbr_store::AbbreviationProtocol;
+use crate::TerminalProtocol;
 use crate::config_store::ConfigItem;
 
 fn default_true() -> bool {
@@ -205,12 +205,12 @@ impl HighlightProtocol {
         }
     }
 
-    /// Convert from AbbreviationProtocol to HighlightProtocol.
-    pub fn from_abbreviation_protocol(protocol: &AbbreviationProtocol) -> Self {
+    /// Convert from TerminalProtocol to HighlightProtocol.
+    pub fn from_terminal_protocol(protocol: &TerminalProtocol) -> Self {
         match protocol {
-            AbbreviationProtocol::All => HighlightProtocol::All,
-            AbbreviationProtocol::Ssh => HighlightProtocol::Ssh,
-            AbbreviationProtocol::Telnet => HighlightProtocol::Telnet,
+            TerminalProtocol::All => HighlightProtocol::All,
+            TerminalProtocol::Ssh => HighlightProtocol::Ssh,
+            TerminalProtocol::Telnet => HighlightProtocol::Telnet,
         }
     }
 }

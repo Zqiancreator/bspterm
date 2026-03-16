@@ -1,4 +1,3 @@
-pub mod abbr_store;
 pub mod active_session_tracker;
 pub mod button_bar_config;
 pub mod command_history;
@@ -28,11 +27,6 @@ pub use session_store::{
 
 pub use button_bar_config::{
     ButtonBarStore, ButtonBarStoreEntity, ButtonBarStoreEvent, ButtonConfig, GlobalButtonBarStore,
-};
-
-pub use abbr_store::{
-    Abbreviation, AbbreviationProtocol, AbbreviationStore, AbbreviationStoreEntity,
-    AbbreviationStoreEvent, GlobalAbbreviationStore,
 };
 
 pub use function_store::{
@@ -91,6 +85,26 @@ pub use number_hover::{NumberFormat, ParsedNumber, find_number_at_position, pars
 
 pub use crate::connection::ssh::{SshAuthConfig, SshConfig};
 pub use crate::connection::telnet::TelnetConfig;
+
+/// Protocol type shared by shortcut bar, highlight rules, and other protocol-aware features.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalProtocol {
+    #[default]
+    All,
+    Ssh,
+    Telnet,
+}
+
+impl TerminalProtocol {
+    pub fn label(&self) -> &'static str {
+        match self {
+            TerminalProtocol::All => "通用",
+            TerminalProtocol::Ssh => "SSH",
+            TerminalProtocol::Telnet => "Telnet",
+        }
+    }
+}
 
 mod pty_info;
 mod terminal_hyperlinks;
@@ -274,12 +288,6 @@ pub enum MaybeNavigationTarget {
     /// File system path, absolute or relative, existing or not.
     /// Might have line and column number(s) attached as `file.rs:1:23`
     PathLike(PathLikeTarget),
-}
-
-/// Represents an abbreviation expansion to apply.
-pub struct AbbreviationExpansion {
-    pub trigger_len: usize,
-    pub expansion: String,
 }
 
 #[derive(Clone)]
@@ -2544,7 +2552,6 @@ impl Terminal {
         &mut self,
         keystroke: &Keystroke,
         option_as_meta: bool,
-        abbr_enabled: bool,
         function_enabled: bool,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -2726,16 +2733,6 @@ impl Terminal {
                 }
             }
 
-            // For Enter, check abbreviation BEFORE updating buffers (which clears them)
-            if abbr_enabled && is_enter {
-                if let Some(expansion) = self.try_expand_abbreviation_for_enter(cx) {
-                    self.apply_expansion_for_enter(&expansion);
-                    self.input(input_bytes.to_vec());
-                    self.autosuggestion = None;
-                    return true;
-                }
-            }
-
             let is_backward_kill_word = keystroke.key.as_str() == "backspace"
                 && keystroke.modifiers.alt
                 && !keystroke.modifiers.control
@@ -2804,17 +2801,6 @@ impl Terminal {
                 // the rendering guard hides/shows ghost text based on cursor position.
             } else {
                 self.update_input_buffers(input_bytes);
-            }
-
-            // For space, check abbreviation AFTER updating buffers
-            if abbr_enabled && !is_enter {
-                if let Some(expansion) = self.try_expand_abbreviation(cx) {
-                    self.apply_expansion(&expansion);
-                    // Clear old ghost text immediately; defer recalculation to Wakeup
-                    self.autosuggestion = None;
-                    self.autosuggestion_needs_update = true;
-                    return true;
-                }
             }
 
             self.input(input_bytes.to_vec());
@@ -2984,102 +2970,6 @@ impl Terminal {
             // No separator found - check if this is the first word on the line
             !line.contains(' ')
         }
-    }
-
-    fn try_expand_abbreviation(&self, cx: &App) -> Option<AbbreviationExpansion> {
-        if !self.current_word_buffer.ends_with(' ') {
-            return None;
-        }
-
-        let word_without_space = &self.current_word_buffer[..self.current_word_buffer.len() - 1];
-        if word_without_space.is_empty() {
-            return None;
-        }
-
-        let store = AbbreviationStoreEntity::try_global(cx)?;
-        let store = store.read(cx);
-
-        if !store.expansion_enabled() {
-            return None;
-        }
-
-        let protocol = self.get_current_protocol();
-        let abbr = store.find_by_trigger(word_without_space, protocol.as_ref())?;
-
-        if !self.is_at_command_position() {
-            return None;
-        }
-
-        Some(AbbreviationExpansion {
-            trigger_len: word_without_space.len(),
-            expansion: abbr.expansion.clone(),
-        })
-    }
-
-    fn apply_expansion(&mut self, expansion: &AbbreviationExpansion) {
-        // Delete only the trigger characters (space hasn't been sent to terminal yet)
-        for _ in 0..expansion.trigger_len {
-            self.input(vec![0x7f]);
-        }
-
-        // Send the expansion followed by space
-        self.input(expansion.expansion.as_bytes().to_vec());
-        self.input(b" ".to_vec());
-
-        // Update word buffer
-        self.current_word_buffer.clear();
-        self.current_word_buffer.push_str(&expansion.expansion);
-        self.current_word_buffer.push(' ');
-
-        // Update line buffer: remove trigger + space, add expansion + space
-        let line_len = self.current_line_buffer.len();
-        if line_len > expansion.trigger_len + 1 {
-            self.current_line_buffer
-                .truncate(line_len - expansion.trigger_len - 1);
-        } else {
-            self.current_line_buffer.clear();
-        }
-        self.current_line_buffer.push_str(&expansion.expansion);
-        self.current_line_buffer.push(' ');
-    }
-
-    fn try_expand_abbreviation_for_enter(&self, cx: &App) -> Option<AbbreviationExpansion> {
-        if self.current_word_buffer.is_empty() {
-            return None;
-        }
-
-        let store = AbbreviationStoreEntity::try_global(cx)?;
-        let store = store.read(cx);
-
-        if !store.expansion_enabled() {
-            return None;
-        }
-
-        let protocol = self.get_current_protocol();
-        let abbr = store.find_by_trigger(&self.current_word_buffer, protocol.as_ref())?;
-
-        if !self.is_at_command_position() {
-            return None;
-        }
-
-        Some(AbbreviationExpansion {
-            trigger_len: self.current_word_buffer.len(),
-            expansion: abbr.expansion.clone(),
-        })
-    }
-
-    fn apply_expansion_for_enter(&mut self, expansion: &AbbreviationExpansion) {
-        // Delete the trigger characters
-        for _ in 0..expansion.trigger_len {
-            self.input(vec![0x7f]);
-        }
-
-        // Send the expansion (Enter will be sent separately by caller)
-        self.input(expansion.expansion.as_bytes().to_vec());
-
-        // Clear buffers since Enter will reset them anyway
-        self.current_word_buffer.clear();
-        self.current_line_buffer.clear();
     }
 
     /// Try to invoke a function from the current line buffer.
@@ -4465,10 +4355,10 @@ impl Terminal {
         self.connection_info = Some(connection_info);
     }
 
-    pub fn get_current_protocol(&self) -> Option<AbbreviationProtocol> {
+    pub fn get_current_protocol(&self) -> Option<TerminalProtocol> {
         match &self.connection_info {
-            Some(ConnectionInfo::Ssh { .. }) => Some(AbbreviationProtocol::Ssh),
-            Some(ConnectionInfo::Telnet { .. }) => Some(AbbreviationProtocol::Telnet),
+            Some(ConnectionInfo::Ssh { .. }) => Some(TerminalProtocol::Ssh),
+            Some(ConnectionInfo::Telnet { .. }) => Some(TerminalProtocol::Telnet),
             None => None,
         }
     }

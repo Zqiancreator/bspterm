@@ -19,7 +19,6 @@ src/
 ├── rule_store.rs         # Automation rule data model (uses JsonConfigStore)
 ├── rule_engine.rs        # Rule execution with regex matching
 ├── recognize_config.rs   # Quick Add auto-recognition rules (version-aware defaults)
-├── abbr_store.rs         # Command abbreviations (uses JsonConfigStore)
 ├── function_store.rs     # Function bar configurations (uses JsonConfigStore)
 ├── highlight_rule.rs     # Highlight rule types and TerminalTokenType
 ├── highlight_store.rs    # Highlight rule storage (uses JsonConfigStore)
@@ -48,7 +47,6 @@ src/
 | `RuleStore` / `RuleEngine` | Automation rules with pattern matching |
 | `AutomationRule` | Trigger + condition + action definition |
 | `RecognizeConfig` / `RecognizeConfigEntity` | Quick Add auto-recognition rules (version-aware defaults) |
-| `AbbreviationStore` | Command abbreviations with protocol filtering |
 | `FunctionStore` | Function bar configurations with protocol filtering |
 | `HighlightStore` | Highlight rules with priority sorting |
 | `ButtonBarStore` | Button bar configurations |

@@ -8,7 +8,7 @@ use gpui::{
 };
 use i18n::t;
 use terminal::{
-    AbbreviationProtocol, get_action_label, Clear, ClearScrollback, Copy, Paste, ScrollLineDown,
+    TerminalProtocol, get_action_label, Clear, ClearScrollback, Copy, Paste, ScrollLineDown,
     ScrollLineUp, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToTop,
     ShortcutBarStoreEntity, ShortcutBarStoreEvent, ToggleViMode, ALL_SYSTEM_ACTIONS,
 };
@@ -485,16 +485,16 @@ pub enum AddShortcutMode {
 
 fn shortcut_protocol_button(
     id: &str,
-    protocol: Option<AbbreviationProtocol>,
-    current: &Option<AbbreviationProtocol>,
+    protocol: Option<TerminalProtocol>,
+    current: &Option<TerminalProtocol>,
     cx: &mut Context<AddShortcutModal>,
 ) -> impl IntoElement {
     let is_selected = &protocol == current;
     let label = match &protocol {
         None => t("shortcut.scope_all"),
-        Some(AbbreviationProtocol::All) => t("shortcut.scope_all"),
-        Some(AbbreviationProtocol::Ssh) => "SSH".into(),
-        Some(AbbreviationProtocol::Telnet) => "Telnet".into(),
+        Some(TerminalProtocol::All) => t("shortcut.scope_all"),
+        Some(TerminalProtocol::Ssh) => "SSH".into(),
+        Some(TerminalProtocol::Telnet) => "Telnet".into(),
     };
 
     Button::new(SharedString::from(id.to_string()), label)
@@ -517,7 +517,7 @@ pub struct AddShortcutModal {
     keybinding_recorder: Entity<KeystrokeRecorder>,
     selected_script: Option<PathBuf>,
     available_scripts: Vec<PathBuf>,
-    selected_protocol: Option<AbbreviationProtocol>,
+    selected_protocol: Option<TerminalProtocol>,
     _subscription: Subscription,
 }
 
@@ -564,7 +564,7 @@ impl AddShortcutModal {
         cx.emit(DismissEvent);
     }
 
-    fn set_protocol(&mut self, protocol: Option<AbbreviationProtocol>, cx: &mut Context<Self>) {
+    fn set_protocol(&mut self, protocol: Option<TerminalProtocol>, cx: &mut Context<Self>) {
         self.selected_protocol = protocol;
         cx.notify();
     }
@@ -778,13 +778,13 @@ term = current_terminal()
                             ))
                             .child(shortcut_protocol_button(
                                 "protocol-ssh",
-                                Some(AbbreviationProtocol::Ssh),
+                                Some(TerminalProtocol::Ssh),
                                 &self.selected_protocol,
                                 cx,
                             ))
                             .child(shortcut_protocol_button(
                                 "protocol-telnet",
-                                Some(AbbreviationProtocol::Telnet),
+                                Some(TerminalProtocol::Telnet),
                                 &self.selected_protocol,
                                 cx,
                             )),
@@ -892,13 +892,13 @@ term = current_terminal()
                             ))
                             .child(shortcut_protocol_button(
                                 "protocol-ssh-ex",
-                                Some(AbbreviationProtocol::Ssh),
+                                Some(TerminalProtocol::Ssh),
                                 &self.selected_protocol,
                                 cx,
                             ))
                             .child(shortcut_protocol_button(
                                 "protocol-telnet-ex",
-                                Some(AbbreviationProtocol::Telnet),
+                                Some(TerminalProtocol::Telnet),
                                 &self.selected_protocol,
                                 cx,
                             )),
@@ -980,16 +980,16 @@ impl Render for AddShortcutModal {
 
 fn edit_shortcut_protocol_button(
     id: &str,
-    protocol: Option<AbbreviationProtocol>,
-    current: &Option<AbbreviationProtocol>,
+    protocol: Option<TerminalProtocol>,
+    current: &Option<TerminalProtocol>,
     cx: &mut Context<EditShortcutModal>,
 ) -> impl IntoElement {
     let is_selected = &protocol == current;
     let label = match &protocol {
         None => t("shortcut.scope_all"),
-        Some(AbbreviationProtocol::All) => t("shortcut.scope_all"),
-        Some(AbbreviationProtocol::Ssh) => "SSH".into(),
-        Some(AbbreviationProtocol::Telnet) => "Telnet".into(),
+        Some(TerminalProtocol::All) => t("shortcut.scope_all"),
+        Some(TerminalProtocol::Ssh) => "SSH".into(),
+        Some(TerminalProtocol::Telnet) => "Telnet".into(),
     };
 
     Button::new(SharedString::from(id.to_string()), label)
@@ -1009,7 +1009,7 @@ pub struct EditShortcutModal {
     shortcut_id: Uuid,
     label_editor: Entity<Editor>,
     keybinding_recorder: Entity<KeystrokeRecorder>,
-    selected_protocol: Option<AbbreviationProtocol>,
+    selected_protocol: Option<TerminalProtocol>,
     _subscription: Subscription,
 }
 
@@ -1068,7 +1068,7 @@ impl EditShortcutModal {
         cx.emit(DismissEvent);
     }
 
-    fn set_protocol(&mut self, protocol: Option<AbbreviationProtocol>, cx: &mut Context<Self>) {
+    fn set_protocol(&mut self, protocol: Option<TerminalProtocol>, cx: &mut Context<Self>) {
         self.selected_protocol = protocol;
         cx.notify();
     }
@@ -1195,13 +1195,13 @@ impl Render for EditShortcutModal {
                                     ))
                                     .child(edit_shortcut_protocol_button(
                                         "edit-protocol-ssh",
-                                        Some(AbbreviationProtocol::Ssh),
+                                        Some(TerminalProtocol::Ssh),
                                         &self.selected_protocol,
                                         cx,
                                     ))
                                     .child(edit_shortcut_protocol_button(
                                         "edit-protocol-telnet",
-                                        Some(AbbreviationProtocol::Telnet),
+                                        Some(TerminalProtocol::Telnet),
                                         &self.selected_protocol,
                                         cx,
                                     )),

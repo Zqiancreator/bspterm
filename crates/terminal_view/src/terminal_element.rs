@@ -1797,7 +1797,7 @@ impl Element for TerminalElement {
                     .terminal
                     .read(cx)
                     .get_current_protocol()
-                    .map(|p| HighlightProtocol::from_abbreviation_protocol(&p));
+                    .map(|p| HighlightProtocol::from_terminal_protocol(&p));
                 let semantic_tokens = Self::compute_semantic_tokens(cells, protocol.as_ref(), cx);
 
                 let content_mode = self.terminal_view.read(cx).content_mode(window, cx);

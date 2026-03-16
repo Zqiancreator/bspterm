@@ -92,4 +92,4 @@ cargo run -p cli  # Run release CLI
 - Theme loading is eager (load active theme at startup)
 - File watchers: themes directory, languages directory (debug), user settings
 - Panels registered: RemoteExplorer, RuleEditor, EditorPanel, TerminalPanel, ProjectPanel, OutlinePanel
-- Global entities initialized: SessionStore, AbbreviationStore, RuleStore, ShortcutBarStore
+- Global entities initialized: SessionStore, RuleStore, ShortcutBarStore

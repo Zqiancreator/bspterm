@@ -378,20 +378,6 @@ script:
   invalid_id: "Invalid script ID"
   shortcut_not_found: "Script shortcut not found"
 
-# Abbreviation Bar
-abbr:
-  config_title: "Abbreviation Configuration"
-  enable_expansion: "Enable Abbreviation Expansion"
-  empty_hint: "No abbreviations, click button below to add"
-  add_title: "Add Abbreviation"
-  edit_title: "Edit Abbreviation"
-  trigger_word: "Trigger Word"
-  expansion_text: "Expansion Text"
-  applicable_protocol: "Applicable Protocol"
-  trigger_placeholder: "Trigger word (e.g., g)"
-  expansion_placeholder: "Expansion text (e.g., git)"
-  label: "Abbreviations"
-
 # Function Bar
 function:
   label: "Functions"
@@ -482,9 +468,6 @@ welcome:
   automation_rules_desc: "Auto-trigger when output matches conditions"
   python_scripts: "Python Scripts"
   python_scripts_desc: "Native Python scripting support"
-  abbreviations: "Abbreviations"
-  abbreviations_desc: "Command abbreviation expansion"
-
   # Features section
   ai_agent: "AI Agent"
   ai_agent_desc: "AI Agent automation support"

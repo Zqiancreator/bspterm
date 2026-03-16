@@ -480,28 +480,6 @@ pub mod terminal_button_bar {
     );
 }
 
-pub mod terminal_abbr_bar {
-    use gpui::actions;
-
-    actions!(
-        terminal_abbr_bar,
-        [
-            /// Toggles the terminal abbreviation bar visibility.
-            ToggleAbbrBar,
-            /// Opens the terminal abbreviation bar configuration modal.
-            ConfigureAbbrBar,
-            /// Adds a new abbreviation to the abbreviation bar.
-            AddAbbreviation,
-            /// Edits the selected abbreviation.
-            EditAbbreviation,
-            /// Deletes the selected abbreviation.
-            DeleteAbbreviation,
-            /// Toggles whether abbreviation expansion is enabled.
-            ToggleAbbrExpansion
-        ]
-    );
-}
-
 pub mod terminal_function_bar {
     use gpui::actions;
 

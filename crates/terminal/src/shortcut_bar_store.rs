@@ -7,7 +7,7 @@ use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global, KeyBindi
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::abbr_store::AbbreviationProtocol;
+use crate::TerminalProtocol;
 
 fn default_true() -> bool {
     true
@@ -79,7 +79,7 @@ pub struct ScriptShortcut {
     pub hidden: bool,
     /// Protocol filter: None means all protocols (including local)
     #[serde(default)]
-    pub protocol: Option<AbbreviationProtocol>,
+    pub protocol: Option<TerminalProtocol>,
 }
 
 impl ScriptShortcut {
@@ -102,7 +102,7 @@ impl ScriptShortcut {
         label: impl Into<String>,
         keybinding: impl Into<String>,
         script_path: impl Into<PathBuf>,
-        protocol: Option<AbbreviationProtocol>,
+        protocol: Option<TerminalProtocol>,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -233,7 +233,7 @@ impl ShortcutBarConfig {
     /// Get visible script shortcuts filtered by protocol.
     pub fn visible_script_shortcuts_for_protocol(
         &self,
-        current_protocol: Option<&AbbreviationProtocol>,
+        current_protocol: Option<&TerminalProtocol>,
     ) -> Vec<&ScriptShortcut> {
         self.script_shortcuts
             .iter()
@@ -243,12 +243,12 @@ impl ShortcutBarConfig {
 
     /// Check if a shortcut's protocol filter matches the current terminal protocol.
     fn protocol_matches(
-        shortcut_protocol: &Option<AbbreviationProtocol>,
-        current_protocol: Option<&AbbreviationProtocol>,
+        shortcut_protocol: &Option<TerminalProtocol>,
+        current_protocol: Option<&TerminalProtocol>,
     ) -> bool {
         match shortcut_protocol {
             None => true,
-            Some(AbbreviationProtocol::All) => true,
+            Some(TerminalProtocol::All) => true,
             Some(p) => current_protocol == Some(p),
         }
     }
@@ -301,11 +301,11 @@ impl ShortcutBarStoreEntity {
     }
 
     /// Build context predicate string based on protocol filter.
-    fn build_context_predicate(protocol: &Option<AbbreviationProtocol>) -> &'static str {
+    fn build_context_predicate(protocol: &Option<TerminalProtocol>) -> &'static str {
         match protocol {
-            Some(AbbreviationProtocol::Ssh) => "Terminal && protocol == ssh",
-            Some(AbbreviationProtocol::Telnet) => "Terminal && protocol == telnet",
-            Some(AbbreviationProtocol::All) | None => "Terminal",
+            Some(TerminalProtocol::Ssh) => "Terminal && protocol == ssh",
+            Some(TerminalProtocol::Telnet) => "Terminal && protocol == telnet",
+            Some(TerminalProtocol::All) | None => "Terminal",
         }
     }
 
@@ -442,7 +442,7 @@ impl ShortcutBarStoreEntity {
     /// Get visible script shortcuts filtered by protocol.
     pub fn visible_script_shortcuts_for_protocol(
         &self,
-        protocol: Option<&AbbreviationProtocol>,
+        protocol: Option<&TerminalProtocol>,
     ) -> Vec<&ScriptShortcut> {
         self.config.visible_script_shortcuts_for_protocol(protocol)
     }
@@ -453,7 +453,7 @@ impl ShortcutBarStoreEntity {
         label: String,
         keybinding: String,
         script_path: PathBuf,
-        protocol: Option<AbbreviationProtocol>,
+        protocol: Option<TerminalProtocol>,
         cx: &mut Context<Self>,
     ) {
         let shortcut = ScriptShortcut::with_protocol(label, keybinding, script_path, protocol);
@@ -515,7 +515,7 @@ impl ShortcutBarStoreEntity {
 
     fn unregister_keybinding_with_context(
         keybinding: &str,
-        protocol: &Option<AbbreviationProtocol>,
+        protocol: &Option<TerminalProtocol>,
         cx: &mut App,
     ) {
         if keybinding.is_empty() {

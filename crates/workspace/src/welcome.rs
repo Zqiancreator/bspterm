@@ -2,7 +2,7 @@ use crate::{
     Workspace,
     item::{Item, ItemEvent},
 };
-use bspterm_actions::{OpenOnboarding, rule_editor, script_panel, terminal_abbr_bar};
+use bspterm_actions::{OpenOnboarding, rule_editor, script_panel};
 use gpui::WeakEntity;
 use gpui::{
     Action, App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -245,14 +245,6 @@ impl WelcomePage {
                 t("welcome.python_scripts_desc"),
                 &script_panel::ToggleFocus,
                 start_index + 1,
-                self.focus_handle.clone(),
-            ))
-            .child(FeatureItem::new(
-                IconName::TextSnippet,
-                t("welcome.abbreviations"),
-                t("welcome.abbreviations_desc"),
-                &terminal_abbr_bar::ConfigureAbbrBar,
-                start_index + 2,
                 self.focus_handle.clone(),
             ))
     }
