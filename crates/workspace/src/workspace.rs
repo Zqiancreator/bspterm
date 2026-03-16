@@ -975,7 +975,7 @@ impl Global for GlobalAppState {}
 
 pub struct WorkspaceStore {
     workspaces: HashSet<WindowHandle<Workspace>>,
-    client: Arc<Client>,
+    _client: Arc<Client>,
     _subscriptions: Vec<client::Subscription>,
 }
 
@@ -7532,7 +7532,7 @@ impl WorkspaceStore {
                 client.add_request_handler(cx.weak_entity(), Self::handle_follow),
                 client.add_message_handler(cx.weak_entity(), Self::handle_update_followers),
             ],
-            client,
+            _client: client,
         }
     }
 

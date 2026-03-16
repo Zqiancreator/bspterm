@@ -21,8 +21,7 @@ src/
 ├── modal_layer.rs            # Modal dialog layer
 ├── toast_layer.rs            # Toast notification layer
 ├── activity_bar.rs           # Activity bar UI
-├── status_bar.rs             # Status bar UI
-└── shared_screen.rs          # Collaboration screen sharing
+└── status_bar.rs             # Status bar UI
 ```
 
 ## Key Types

@@ -268,23 +268,34 @@ impl ButtonBarConfigModal {
 # 参数在脚本中通过 params.参数名 访问
 #
 # @params
-# - para1: string
+# - input1: string
 #   description: 参数1
 #   required: true
 #   default: ""
+#
+# - input2: number
+#   description: 参数2
+#   default: 0
+#
+# - input3: boolean
+#   description: 参数3
+#   default: false
 # @end_params
 """
 from bspterm import current_terminal
+from bspterm import params
 
-def main():
-    term = current_terminal()
-    # 在此编写你的自动化逻辑
-    # term.send("命令\n")       # 发送命令
-    # term.wait_for("模式")     # 等待输出匹配
-    # output = term.run("命令") # 执行命令并返回输出
+term = current_terminal()
+# 在此编写你的自动化逻辑
+# term.send("命令\n")       # 发送命令
+# term.wait_for("模式")     # 等待输出匹配
+# output = term.run("命令") # 执行命令并返回输出
 
-if __name__ == "__main__":
-    main()
+# --- 传参示例（全部取消注释即可运行） ---
+# input1 = params.input1
+# input2 = params.get("input2", 0)
+# input3 = params.get("input3", False)
+# term.send(f"{input1}\n")
 "#;
             workspace.update_in(cx, |workspace, window, cx| {
                 let buffer = project.update(cx, |project, cx| {

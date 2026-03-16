@@ -431,23 +431,34 @@ impl AddFunctionModal {
 # 参数在脚本中通过 params.参数名 访问
 #
 # @params
-# - para1: string
+# - input1: string
 #   description: 参数1
 #   required: true
 #   default: ""
+#
+# - input2: number
+#   description: 参数2
+#   default: 0
+#
+# - input3: boolean
+#   description: 参数3
+#   default: false
 # @end_params
 """
 from bspterm import current_terminal
+from bspterm import params
 
-def main():
-    term = current_terminal()
-    # 在此编写你的自动化逻辑
-    # term.send("命令\n")       # 发送命令
-    # term.wait_for("模式")     # 等待输出匹配
-    # output = term.run("命令") # 执行命令并返回输出
+term = current_terminal()
+# 在此编写你的自动化逻辑
+# term.send("命令\n")       # 发送命令
+# term.wait_for("模式")     # 等待输出匹配
+# output = term.run("命令") # 执行命令并返回输出
 
-if __name__ == "__main__":
-    main()
+# --- 传参示例（全部取消注释即可运行） ---
+# input1 = params.input1
+# input2 = params.get("input2", 0)
+# input3 = params.get("input3", False)
+# term.send(f"{{input1}}\n")
 "#
         );
 
@@ -773,11 +784,11 @@ impl Render for AddFunctionModal {
     }
 }
 
-fn edit_protocol_button(
+fn rename_protocol_button(
     id: &str,
     protocol: FunctionProtocol,
     current: &FunctionProtocol,
-    cx: &mut Context<EditFunctionModal>,
+    cx: &mut Context<RenameFunctionModal>,
 ) -> impl IntoElement {
     let is_selected = &protocol == current;
     let label = protocol.label();
@@ -794,26 +805,25 @@ fn edit_protocol_button(
         }))
 }
 
-/// Modal dialog for editing an existing function.
-pub struct EditFunctionModal {
+/// Modal dialog for renaming a function (name + protocol only).
+pub struct RenameFunctionModal {
     focus_handle: FocusHandle,
     func_id: Uuid,
     name_editor: Entity<Editor>,
-    script_path_editor: Entity<Editor>,
     protocol: FunctionProtocol,
 }
 
-impl ModalView for EditFunctionModal {}
+impl ModalView for RenameFunctionModal {}
 
-impl EventEmitter<DismissEvent> for EditFunctionModal {}
+impl EventEmitter<DismissEvent> for RenameFunctionModal {}
 
-impl Focusable for EditFunctionModal {
+impl Focusable for RenameFunctionModal {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl EditFunctionModal {
+impl RenameFunctionModal {
     pub fn new(func_id: Uuid, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
@@ -821,8 +831,8 @@ impl EditFunctionModal {
         let store = FunctionStoreEntity::global(cx);
         let func = store.read(cx).find_function(func_id);
 
-        let (name_text, script_path_text, protocol) = func
-            .map(|f| (f.name.clone(), f.script_path.display().to_string(), f.protocol.clone()))
+        let (name_text, protocol) = func
+            .map(|f| (f.name.clone(), f.protocol.clone()))
             .unwrap_or_default();
 
         let name_editor = cx.new(|cx| {
@@ -831,17 +841,10 @@ impl EditFunctionModal {
             ed
         });
 
-        let script_path_editor = cx.new(|cx| {
-            let mut ed = Editor::single_line(window, cx);
-            ed.set_text(script_path_text, window, cx);
-            ed
-        });
-
         Self {
             focus_handle,
             func_id,
             name_editor,
-            script_path_editor,
             protocol,
         }
     }
@@ -853,14 +856,11 @@ impl EditFunctionModal {
 
     fn confirm(&mut self, _: &menu::Confirm, _window: &mut Window, cx: &mut Context<Self>) {
         let name = self.name_editor.read(cx).text(cx);
-        let script_path_str = self.script_path_editor.read(cx).text(cx);
 
-        if name.is_empty() || script_path_str.is_empty() {
+        if name.is_empty() {
             cx.emit(DismissEvent);
             return;
         }
-
-        let script_path = PathBuf::from(script_path_str);
 
         if let Some(store) = FunctionStoreEntity::try_global(cx) {
             let func_id = self.func_id;
@@ -870,7 +870,6 @@ impl EditFunctionModal {
                     func_id,
                     move |func| {
                         func.name = name;
-                        func.script_path = script_path;
                         func.protocol = protocol;
                     },
                     cx,
@@ -886,12 +885,12 @@ impl EditFunctionModal {
     }
 }
 
-impl Render for EditFunctionModal {
+impl Render for RenameFunctionModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_protocol = self.protocol.clone();
 
         v_flex()
-            .key_context("EditFunctionModal")
+            .key_context("RenameFunctionModal")
             .elevation_3(cx)
             .p_4()
             .gap_3()
@@ -903,7 +902,7 @@ impl Render for EditFunctionModal {
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(t("function.edit_title")),
+                    .child(t("function.edit_name_title")),
             )
             .child(
                 v_flex()
@@ -917,30 +916,24 @@ impl Render for EditFunctionModal {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(Label::new(t("function.script_path_label")).size(LabelSize::Small))
-                            .child(self.script_path_editor.clone()),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
                             .child(Label::new(t("function.applicable_protocol")).size(LabelSize::Small))
                             .child(
                                 h_flex()
                                     .gap_2()
-                                    .child(edit_protocol_button(
-                                        "edit-all",
+                                    .child(rename_protocol_button(
+                                        "rename-all",
                                         FunctionProtocol::All,
                                         &current_protocol,
                                         cx,
                                     ))
-                                    .child(edit_protocol_button(
-                                        "edit-ssh",
+                                    .child(rename_protocol_button(
+                                        "rename-ssh",
                                         FunctionProtocol::Ssh,
                                         &current_protocol,
                                         cx,
                                     ))
-                                    .child(edit_protocol_button(
-                                        "edit-telnet",
+                                    .child(rename_protocol_button(
+                                        "rename-telnet",
                                         FunctionProtocol::Telnet,
                                         &current_protocol,
                                         cx,

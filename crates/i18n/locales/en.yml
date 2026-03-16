@@ -401,6 +401,8 @@ function:
   available_scripts: "Available Scripts"
   add_title: "Add Function"
   edit_title: "Edit Function"
+  edit_script: "Edit Script"
+  edit_name_title: "Rename Function"
   name_label: "Function Name"
   name_placeholder: "Function name (e.g., disp_boa)"
   script_path_label: "Script Path"

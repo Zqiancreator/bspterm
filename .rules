@@ -31,7 +31,6 @@ Fork of [Zed](https://github.com/zed-industries/zed), a GPU-accelerated code edi
 - **lsp** (`crates/lsp`): LSP server communication
 - **vim** (`crates/vim`): Vim mode implementation
 - **ui** (`crates/ui`): Shared UI components
-- **collab** (`crates/collab`): Collaboration server
 - **terminal** / **terminal_view** (`crates/terminal`, `crates/terminal_view`): Terminal emulator with SSH/Telnet, automation rules
 - **remote_explorer** (`crates/remote_explorer`): SSH/Telnet session tree panel
 - **rule_editor** (`crates/rule_editor`): Terminal automation rules panel

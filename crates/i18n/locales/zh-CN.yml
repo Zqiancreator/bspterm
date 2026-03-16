@@ -401,6 +401,8 @@ function:
   available_scripts: "可用脚本"
   add_title: "添加函数"
   edit_title: "编辑函数"
+  edit_script: "修改按钮脚本"
+  edit_name_title: "修改函数名"
   name_label: "函数名"
   name_placeholder: "函数名 (如: disp_boa)"
   script_path_label: "脚本路径"

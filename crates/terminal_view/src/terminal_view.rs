@@ -90,15 +90,15 @@ use bspterm_actions::{
     },
     terminal_button_bar::{ConfigureButtonBar, ToggleButtonBar},
     terminal_function_bar::{
-        AddFunction, ConfigureFunctionBar, DeleteFunction, EditFunction, ToggleFunctionBar,
-        ToggleFunctionEnabled,
+        AddFunction, ConfigureFunctionBar, DeleteFunction, EditFunctionScript,
+        RenameFunctionButton, ToggleFunctionBar, ToggleFunctionEnabled,
     },
     terminal_shortcut_bar::{ConfigureShortcutBar, RunScriptShortcut, ToggleShortcutBar},
 };
 use call_graph_panel::TraceConfigModal;
 use abbr_bar::{AbbrBarConfigModal, AddAbbrModal, EditAbbrModal};
 use button_bar::ButtonBarScriptRunner;
-use function_bar::{FunctionBarConfigModal, AddFunctionModal, EditFunctionModal};
+use function_bar::{FunctionBarConfigModal, AddFunctionModal, RenameFunctionModal};
 use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     SessionStoreEntity, get_action_label, AbbreviationProtocol, AbbreviationStoreEntity,
@@ -326,8 +326,8 @@ pub struct TerminalView {
     _abbr_store_subscription: Option<Subscription>,
     /// Currently selected abbreviation for context menu operations
     selected_abbr: Option<uuid::Uuid>,
-    /// Currently selected function for context menu operations
-    selected_function: Option<uuid::Uuid>,
+    /// Currently selected function for context menu operations (func_id, script_path)
+    selected_function: Option<(uuid::Uuid, PathBuf)>,
     /// Drag target for function bar reordering
     function_drag_target: Option<FunctionDragTarget>,
     _shortcut_bar_subscription: Option<Subscription>,
@@ -2075,15 +2075,18 @@ print(output)
     fn deploy_function_context_menu(
         &mut self,
         func_id: uuid::Uuid,
+        script_path: PathBuf,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.selected_function = Some(func_id);
+        self.selected_function = Some((func_id, script_path));
 
         let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
             menu.context(self.focus_handle.clone())
-                .action(t("common.edit"), Box::new(EditFunction))
+                .action(t("function.edit_script"), Box::new(EditFunctionScript))
+                .action(t("function.edit_name_title"), Box::new(RenameFunctionButton))
+                .separator()
                 .action(t("common.delete"), Box::new(DeleteFunction))
         });
 
@@ -2360,18 +2363,22 @@ print(output)
                             ))
                             .on_mouse_down(
                                 MouseButton::Right,
-                                move |event: &MouseDownEvent, window, cx| {
-                                    terminal_view_handle_for_menu
-                                        .update(cx, |this, cx| {
-                                            this.deploy_function_context_menu(
-                                                func_id,
-                                                event.position,
-                                                window,
-                                                cx,
-                                            );
-                                        })
-                                        .ok();
-                                    cx.stop_propagation();
+                                {
+                                    let func_script_path = func_script_path.clone();
+                                    move |event: &MouseDownEvent, window, cx| {
+                                        terminal_view_handle_for_menu
+                                            .update(cx, |this, cx| {
+                                                this.deploy_function_context_menu(
+                                                    func_id,
+                                                    func_script_path.clone(),
+                                                    event.position,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                            .ok();
+                                        cx.stop_propagation();
+                                    }
                                 },
                             )
                             .child(
@@ -2494,22 +2501,51 @@ print(output)
             .ok();
     }
 
-    fn edit_function(&mut self, _: &EditFunction, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(func_id) = self.selected_function.take() else {
+    fn edit_function_script(
+        &mut self,
+        _: &EditFunctionScript,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((_, script_path)) = self.selected_function.take() else {
+            return;
+        };
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+
+        cx.spawn_in(window, async move |_, cx| {
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace
+                    .open_abs_path(script_path, workspace::OpenOptions::default(), window, cx)
+                    .detach();
+            })?;
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn rename_function_button(
+        &mut self,
+        _: &RenameFunctionButton,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((func_id, _)) = self.selected_function.take() else {
             return;
         };
 
         self.workspace
             .update(cx, |workspace, cx| {
                 workspace.toggle_modal(window, cx, |window, cx| {
-                    EditFunctionModal::new(func_id, window, cx)
+                    RenameFunctionModal::new(func_id, window, cx)
                 });
             })
             .ok();
     }
 
     fn delete_function(&mut self, _: &DeleteFunction, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(func_id) = self.selected_function.take() else {
+        let Some((func_id, _)) = self.selected_function.take() else {
             return;
         };
         let Some(store) = FunctionStoreEntity::try_global(cx) else {
@@ -4308,7 +4344,8 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::toggle_function_bar))
             .on_action(cx.listener(Self::configure_function_bar))
             .on_action(cx.listener(Self::add_function))
-            .on_action(cx.listener(Self::edit_function))
+            .on_action(cx.listener(Self::edit_function_script))
+            .on_action(cx.listener(Self::rename_function_button))
             .on_action(cx.listener(Self::delete_function))
             .on_action(cx.listener(Self::toggle_function_enabled))
             .on_action(cx.listener(Self::toggle_shortcut_bar))

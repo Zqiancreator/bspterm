@@ -514,8 +514,10 @@ pub mod terminal_function_bar {
             ConfigureFunctionBar,
             /// Adds a new function to the function bar.
             AddFunction,
-            /// Edits the selected function.
-            EditFunction,
+            /// Opens the script file for a function bar function in the editor.
+            EditFunctionScript,
+            /// Opens a dialog to rename a function bar function.
+            RenameFunctionButton,
             /// Deletes the selected function.
             DeleteFunction,
             /// Toggles whether function invocation is enabled.
