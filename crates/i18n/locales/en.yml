@@ -187,6 +187,7 @@ remote_explorer:
   sort_by: "Sort By"
   sort_addition_order: "Addition Order"
   sort_name_ascending: "Sort by Name"
+  new_session: "New Session"
   pin_group: "Pin Group"
   unpin_group: "Unpin Group"
   switch_to_ssh: "Switch to SSH"

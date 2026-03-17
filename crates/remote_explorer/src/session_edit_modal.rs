@@ -27,6 +27,8 @@ pub struct SessionEditModal {
     selected_credential: Option<(String, String)>,
     programmatic_change_count: usize,
     protocol: ProtocolType,
+    is_create_mode: bool,
+    parent_group_id: Option<Uuid>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -150,6 +152,92 @@ impl SessionEditModal {
             selected_credential,
             programmatic_change_count: 0,
             protocol,
+            is_create_mode: false,
+            parent_group_id: None,
+            focus_handle,
+            _subscriptions: vec![username_subscription, password_subscription],
+        }
+    }
+
+    pub fn new_create(
+        parent_group_id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let session_store = SessionStoreEntity::global(cx);
+        let focus_handle = cx.focus_handle();
+
+        let name_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("session_edit.session_name"), window, cx);
+            editor
+        });
+
+        let host_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("session_edit.host"), window, cx);
+            editor
+        });
+
+        let port_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text("22", window, cx);
+            editor.set_placeholder_text(&t("session_edit.port"), window, cx);
+            editor
+        });
+
+        let username_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("session_edit.username"), window, cx);
+            editor
+        });
+
+        let password_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t("session_edit.password"), window, cx);
+            editor
+        });
+
+        let username_subscription =
+            cx.subscribe(&username_editor, |this: &mut Self, _, event: &editor::EditorEvent, cx| {
+                if matches!(event, editor::EditorEvent::BufferEdited { .. }) {
+                    if this.programmatic_change_count > 0 {
+                        this.programmatic_change_count -= 1;
+                    } else {
+                        this.selected_credential = None;
+                        cx.notify();
+                    }
+                }
+            });
+
+        let password_subscription =
+            cx.subscribe(&password_editor, |this: &mut Self, _, event: &editor::EditorEvent, cx| {
+                if matches!(event, editor::EditorEvent::BufferEdited { .. }) {
+                    if this.programmatic_change_count > 0 {
+                        this.programmatic_change_count -= 1;
+                    } else {
+                        this.selected_credential = None;
+                        cx.notify();
+                    }
+                }
+            });
+
+        window.focus(&name_editor.focus_handle(cx), cx);
+
+        Self {
+            session_id: Uuid::new_v4(),
+            session_store,
+            name_editor,
+            host_editor,
+            port_editor,
+            username_editor,
+            password_editor,
+            selected_terminal_type: None,
+            selected_credential: None,
+            programmatic_change_count: 0,
+            protocol: ProtocolType::Ssh,
+            is_create_mode: true,
+            parent_group_id,
             focus_handle,
             _subscriptions: vec![username_subscription, password_subscription],
         }
@@ -169,56 +257,107 @@ impl SessionEditModal {
         let terminal_type = self.selected_terminal_type.clone();
 
         let protocol = self.protocol;
-        self.session_store.update(cx, |store, cx| {
-            store.update_session(
-                self.session_id,
-                |session| {
-                    session.name = name;
-                    match protocol {
-                        ProtocolType::Ssh => {
-                            session.protocol = ProtocolConfig::Ssh(SshSessionConfig {
-                                host,
-                                port,
-                                username: if username.is_empty() {
-                                    None
-                                } else {
-                                    Some(username)
-                                },
-                                auth: if password.is_empty() {
-                                    AuthMethod::Interactive
-                                } else {
-                                    AuthMethod::Password { password }
-                                },
-                                env: std::collections::HashMap::new(),
-                                keepalive_interval_secs: Some(5),
-                                keepalive_max: Some(2),
-                                initial_command: None,
-                                terminal_type,
-                            });
+
+        if self.is_create_mode {
+            let config = match protocol {
+                ProtocolType::Ssh => SessionConfig::new_ssh(
+                    name,
+                    SshSessionConfig {
+                        host,
+                        port,
+                        username: if username.is_empty() {
+                            None
+                        } else {
+                            Some(username)
+                        },
+                        auth: if password.is_empty() {
+                            AuthMethod::Interactive
+                        } else {
+                            AuthMethod::Password { password }
+                        },
+                        env: std::collections::HashMap::new(),
+                        keepalive_interval_secs: Some(5),
+                        keepalive_max: Some(2),
+                        initial_command: None,
+                        terminal_type,
+                    },
+                ),
+                ProtocolType::Telnet => SessionConfig::new_telnet(
+                    name,
+                    TelnetSessionConfig {
+                        host,
+                        port,
+                        username: if username.is_empty() {
+                            None
+                        } else {
+                            Some(username)
+                        },
+                        password: if password.is_empty() {
+                            None
+                        } else {
+                            Some(password)
+                        },
+                        encoding: None,
+                        terminal_type,
+                    },
+                ),
+            };
+            let parent_group_id = self.parent_group_id;
+            self.session_store.update(cx, |store, cx| {
+                store.add_session(config, parent_group_id, cx);
+            });
+        } else {
+            self.session_store.update(cx, |store, cx| {
+                store.update_session(
+                    self.session_id,
+                    |session| {
+                        session.name = name;
+                        match protocol {
+                            ProtocolType::Ssh => {
+                                session.protocol = ProtocolConfig::Ssh(SshSessionConfig {
+                                    host,
+                                    port,
+                                    username: if username.is_empty() {
+                                        None
+                                    } else {
+                                        Some(username)
+                                    },
+                                    auth: if password.is_empty() {
+                                        AuthMethod::Interactive
+                                    } else {
+                                        AuthMethod::Password { password }
+                                    },
+                                    env: std::collections::HashMap::new(),
+                                    keepalive_interval_secs: Some(5),
+                                    keepalive_max: Some(2),
+                                    initial_command: None,
+                                    terminal_type,
+                                });
+                            }
+                            ProtocolType::Telnet => {
+                                session.protocol = ProtocolConfig::Telnet(TelnetSessionConfig {
+                                    host,
+                                    port,
+                                    username: if username.is_empty() {
+                                        None
+                                    } else {
+                                        Some(username)
+                                    },
+                                    password: if password.is_empty() {
+                                        None
+                                    } else {
+                                        Some(password)
+                                    },
+                                    encoding: None,
+                                    terminal_type,
+                                });
+                            }
                         }
-                        ProtocolType::Telnet => {
-                            session.protocol = ProtocolConfig::Telnet(TelnetSessionConfig {
-                                host,
-                                port,
-                                username: if username.is_empty() {
-                                    None
-                                } else {
-                                    Some(username)
-                                },
-                                password: if password.is_empty() {
-                                    None
-                                } else {
-                                    Some(password)
-                                },
-                                encoding: None,
-                                terminal_type,
-                            });
-                        }
-                    }
-                },
-                cx,
-            );
-        });
+                    },
+                    cx,
+                );
+            });
+        }
 
         cx.emit(DismissEvent);
     }
@@ -306,6 +445,12 @@ impl Render for SessionEditModal {
             ProtocolType::Telnet => "Telnet",
         };
 
+        let title = if self.is_create_mode {
+            t("session_edit.title_new").to_string()
+        } else {
+            t("session_edit.title_edit_protocol").replace("{}", protocol_label)
+        };
+
         let terminal_type_label = self
             .selected_terminal_type
             .clone()
@@ -377,7 +522,7 @@ impl Render for SessionEditModal {
                     .border_b_1()
                     .border_color(border_variant_color)
                     .justify_between()
-                    .child(Label::new(t("session_edit.title_edit_protocol").replace("{}", protocol_label)))
+                    .child(Label::new(title))
                     .child(
                         Button::new("close", "")
                             .icon(IconName::Close)
@@ -393,6 +538,57 @@ impl Render for SessionEditModal {
                     .w_full()
                     .p_2()
                     .gap_2()
+                    .when(self.is_create_mode, |this| {
+                        let weak_self = cx.weak_entity();
+                        let protocol_menu = ContextMenu::build(window, cx, move |menu, _, _| {
+                            let weak_for_ssh = weak_self.clone();
+                            let weak_for_telnet = weak_self.clone();
+                            menu.entry("SSH", None, move |window, cx| {
+                                weak_for_ssh
+                                    .update(cx, |this, cx| {
+                                        if this.protocol != ProtocolType::Ssh {
+                                            this.protocol = ProtocolType::Ssh;
+                                            this.port_editor.update(cx, |editor, cx| {
+                                                editor.set_text("22", window, cx);
+                                            });
+                                            cx.notify();
+                                        }
+                                    })
+                                    .ok();
+                            })
+                            .entry("Telnet", None, move |window, cx| {
+                                weak_for_telnet
+                                    .update(cx, |this, cx| {
+                                        if this.protocol != ProtocolType::Telnet {
+                                            this.protocol = ProtocolType::Telnet;
+                                            this.port_editor.update(cx, |editor, cx| {
+                                                editor.set_text("23", window, cx);
+                                            });
+                                            cx.notify();
+                                        }
+                                    })
+                                    .ok();
+                            })
+                        });
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    Label::new(t("session_edit.protocol"))
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                )
+                                .child(
+                                    DropdownMenu::new(
+                                        "protocol",
+                                        protocol_label,
+                                        protocol_menu,
+                                    )
+                                    .full_width(true)
+                                    .style(DropdownStyle::Outlined),
+                                ),
+                        )
+                    })
                     .child(
                         v_flex()
                             .gap_1()

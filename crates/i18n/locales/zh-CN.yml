@@ -187,6 +187,7 @@ remote_explorer:
   sort_by: "排序方式"
   sort_addition_order: "添加顺序"
   sort_name_ascending: "名称排序"
+  new_session: "新建会话"
   pin_group: "置顶分组"
   unpin_group: "取消置顶"
   switch_to_ssh: "切换为 SSH"

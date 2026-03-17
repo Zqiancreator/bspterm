@@ -871,6 +871,7 @@ impl RemoteExplorer {
                 let session_store_for_copy = session_store_entity.clone();
                 ContextMenu::build(window, cx, move |menu, _window, _cx| {
                     let workspace_for_edit = workspace.clone();
+                    let workspace_for_new = workspace_for_edit.clone();
                     let pin_label = if is_pinned {
                         t("remote_explorer.unpin_group")
                     } else {
@@ -881,6 +882,15 @@ impl RemoteExplorer {
                         session_store_for_pin.update(cx, |store, cx| {
                             store.toggle_pin_group(entry_id, cx);
                         });
+                    })
+                    .entry(t("remote_explorer.new_session"), None, move |window, cx| {
+                        if let Some(workspace) = workspace_for_new.upgrade() {
+                            workspace.update(cx, |ws, cx| {
+                                ws.toggle_modal(window, cx, |window, cx| {
+                                    SessionEditModal::new_create(Some(entry_id), window, cx)
+                                });
+                            });
+                        }
                     })
                     .separator()
                     .entry(t("remote_explorer.rename_group"), None, move |window, cx| {
