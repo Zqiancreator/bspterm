@@ -247,6 +247,17 @@ Regex-based highlighting in `crates/terminal/src/highlight_rule.rs`, `highlight_
 
 Common pattern via `crates/terminal/src/config_store.rs`: `ConfigItem` trait (`fn id() -> Uuid`) + `JsonConfigStore` trait (load/save/CRUD/move). Stores: `FunctionStore`, `RuleStore`, `HighlightStore`, `ButtonBarStore`. Each has a GPUI Entity wrapper with Global marker, event emission, and async save scheduling.
 
+## Settings 默认值的多层定义
+
+修改任何 setting 的默认值时，必须同步更新以下 4 处（以 terminal 相关设置为例）：
+
+1. **Rust 硬编码默认值** — `crates/terminal/src/terminal_settings.rs` 的 `Default` impl（仅在 `default.json` 未指定时生效）
+2. **`assets/settings/default.json`** — 运行时实际加载的默认值，**会覆盖 Rust 默认值**，是用户真正看到的行为
+3. **`crates/settings_content/src/terminal.rs`** — `/// Default: "..."` 文档注释，生成 settings JSON schema
+4. **`crates/settings_ui/src/page_data.rs`** — Settings UI 的 `placeholder`，用户在 UI 中看到的示例值
+
+**关键陷阱：只改 Rust 默认值不够。** `default.json` 在启动时被加载并合并到 settings 中，优先级高于 Rust `Default` impl。如果 `default.json` 中已有该字段的值，Rust 侧的改动完全无效。
+
 ## Agent Connection Fallback
 
 `crates/agent_servers/` — connection modes: `auto` (ACP→Terminal fallback), `acp`, `terminal`, `prompt`. Config in `crates/settings_content/src/agent.rs` (`ConnectionMode` enum). Use `terminal` mode when agent outputs non-JSON to stdout.

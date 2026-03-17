@@ -6448,7 +6448,7 @@ fn terminal_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("${session_name}_%Y%m%d_%H%M%S.log"),
+                    placeholder: Some("${session_name}_%Y-%m-%d_%H.%M.%S_${weekday_cn}.log"),
                     ..Default::default()
                 })),
             }),

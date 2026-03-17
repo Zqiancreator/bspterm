@@ -2945,38 +2945,6 @@ impl Terminal {
         }
     }
 
-    fn is_at_command_position(&self) -> bool {
-        // Remove trailing space (which triggers the expansion check)
-        let line = self.current_line_buffer.trim_end().trim_start();
-        if line.is_empty() {
-            return true;
-        }
-
-        // Find the last command separator
-        let last_command_sep = line
-            .rfind(|c| c == '|' || c == ';')
-            .or_else(|| {
-                if let Some(pos) = line.rfind("&&") {
-                    Some(pos + 1)
-                } else if let Some(pos) = line.rfind("||") {
-                    Some(pos + 1)
-                } else {
-                    None
-                }
-            });
-
-        if let Some(sep_pos) = last_command_sep {
-            // Check if we're at the first word after the separator
-            let after_sep = &line[sep_pos + 1..];
-            let after_sep = after_sep.trim_start();
-            // No spaces means we're typing the command name
-            !after_sep.contains(' ')
-        } else {
-            // No separator found - check if this is the first word on the line
-            !line.contains(' ')
-        }
-    }
-
     /// Try to invoke a function from the current line buffer.
     /// Returns Some(FunctionInvocation) if a matching function is found.
     fn try_invoke_function(&self, cx: &App) -> Option<FunctionInvocation> {
