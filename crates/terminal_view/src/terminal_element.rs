@@ -1338,22 +1338,6 @@ impl TerminalElement {
                     terminal.update(cx, |terminal, cx| {
                         terminal.mouse_move(e, cx);
                     });
-
-                    // Schedule number hover detection when not in text selection mode
-                    if e.pressed_button.is_none() {
-                        log::debug!(
-                            "[NumberHover] Mouse move in hitbox: position={:?}",
-                            e.position
-                        );
-                        terminal_view.update(cx, |view, cx| {
-                            view.schedule_number_hover(e.position, window, cx);
-                        });
-                    }
-                } else {
-                    // Clear number hover when mouse leaves terminal
-                    terminal_view.update(cx, |view, cx| {
-                        view.clear_number_hover(cx);
-                    });
                 }
             }
         });
@@ -1812,16 +1796,6 @@ impl Element for TerminalElement {
                 if let Some(selection) = selection {
                     relative_highlighted_ranges
                         .push((selection.start..=selection.end, player_color.selection));
-                }
-
-                // Add number hover highlight
-                if let Some(ref hovered_number) =
-                    self.terminal.read(cx).last_content.last_hovered_number
-                {
-                    // Use a golden/yellow highlight color for better visibility
-                    let number_highlight_color = gpui::hsla(45.0 / 360.0, 0.8, 0.5, 0.35);
-                    relative_highlighted_ranges
-                        .push((hovered_number.parsed.word_match.clone(), number_highlight_color));
                 }
 
                 // Add outline jump highlight

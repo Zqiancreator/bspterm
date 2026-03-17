@@ -210,8 +210,8 @@ pub fn find_number_at_position<T: EventListener>(
     let cell = grid.index(point);
     let c = cell.c;
 
-    // Must start with a digit or minus sign (for negative numbers)
-    if !c.is_ascii_digit() && c != '-' {
+    // Must be a character that can be part of a number (digits, hex letters, prefix chars, etc.)
+    if !is_number_char(c) {
         return None;
     }
 

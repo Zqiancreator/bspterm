@@ -308,8 +308,6 @@ enum InternalEvent {
     ToggleViMode,
     ViMotion(ViMotion),
     MoveViCursorToAlacPoint(AlacPoint),
-    // Number hover detection
-    FindNumber(Point<Pixels>),
 }
 
 ///A translation struct for Alacritty to communicate with us from their event loop
@@ -1502,7 +1500,6 @@ pub struct TerminalContent {
     pub cursor_char: char,
     pub terminal_bounds: TerminalBounds,
     pub last_hovered_word: Option<HoveredWord>,
-    pub last_hovered_number: Option<HoveredNumber>,
     pub clicked_word: Option<String>,
     pub word_highlights: Vec<WordHighlight>,
     pub scrolled_to_top: bool,
@@ -1513,12 +1510,6 @@ pub struct TerminalContent {
 pub struct HoveredWord {
     pub word: String,
     pub word_match: RangeInclusive<AlacPoint>,
-    pub id: usize,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct HoveredNumber {
-    pub parsed: number_hover::ParsedNumber,
     pub id: usize,
 }
 
@@ -1543,7 +1534,6 @@ impl Default for TerminalContent {
             cursor_char: Default::default(),
             terminal_bounds: Default::default(),
             last_hovered_word: None,
-            last_hovered_number: None,
             clicked_word: None,
             word_highlights: Vec::new(),
             scrolled_to_top: false,
@@ -2103,50 +2093,6 @@ impl Terminal {
             }
             InternalEvent::ProcessHyperlink(hyperlink, open) => {
                 self.process_hyperlink(hyperlink.clone(), *open, cx);
-            }
-            InternalEvent::FindNumber(position) => {
-                log::debug!("[NumberHover] Processing FindNumber event: position={position:?}");
-
-                let point = grid_point(
-                    *position,
-                    self.last_content.terminal_bounds,
-                    term.grid().display_offset(),
-                )
-                .grid_clamp(term, Boundary::Grid);
-
-                log::debug!("[NumberHover] Grid point: {:?}", point);
-
-                match number_hover::find_number_at_position(term, point) {
-                    Some(parsed_number) => {
-                        log::debug!(
-                            "[NumberHover] Found number: {:?} at {:?}",
-                            parsed_number.original,
-                            parsed_number.word_match
-                        );
-                        let prev = self.last_content.last_hovered_number.take();
-                        let id = if let Some(ref prev) = prev {
-                            if prev.parsed.word_match == parsed_number.word_match {
-                                prev.id
-                            } else {
-                                self.next_link_id()
-                            }
-                        } else {
-                            self.next_link_id()
-                        };
-                        self.last_content.last_hovered_number = Some(HoveredNumber {
-                            parsed: parsed_number,
-                            id,
-                        });
-                        cx.notify();
-                    }
-                    None => {
-                        log::debug!("[NumberHover] No number found at grid point");
-                        if self.last_content.last_hovered_number.is_some() {
-                            self.last_content.last_hovered_number = None;
-                            cx.notify();
-                        }
-                    }
-                }
             }
         }
     }
@@ -3624,7 +3570,6 @@ impl Terminal {
             cursor_char: term.grid()[content.cursor.point].c,
             terminal_bounds: last_content.terminal_bounds,
             last_hovered_word: last_content.last_hovered_word.clone(),
-            last_hovered_number: last_content.last_hovered_number.clone(),
             clicked_word: last_content.clicked_word.clone(),
             word_highlights: last_content.word_highlights.clone(),
             scrolled_to_top: content.display_offset == term.history_size(),
@@ -3816,42 +3761,6 @@ impl Terminal {
         }
     }
 
-    /// Schedules a search for a number at the given position.
-    /// Unlike hyperlink search, this doesn't require modifier keys.
-    pub fn schedule_find_number(&mut self, position: Point<Pixels>) {
-        log::debug!(
-            "[NumberHover] schedule_find_number: position={:?}, bounds={:?}, selecting={}",
-            position,
-            self.last_content.terminal_bounds.bounds,
-            self.selection_phase == SelectionPhase::Selecting
-        );
-
-        // Don't search during text selection
-        if self.selection_phase == SelectionPhase::Selecting
-            || !self.last_content.terminal_bounds.bounds.contains(&position)
-        {
-            log::debug!(
-                "[NumberHover] Skipping: selection={}, contains={}",
-                self.selection_phase == SelectionPhase::Selecting,
-                self.last_content.terminal_bounds.bounds.contains(&position)
-            );
-            if self.last_content.last_hovered_number.is_some() {
-                self.last_content.last_hovered_number = None;
-            }
-            return;
-        }
-
-        log::debug!("[NumberHover] Queuing FindNumber event");
-        self.events.push_back(InternalEvent::FindNumber(
-            position - self.last_content.terminal_bounds.bounds.origin,
-        ));
-    }
-
-    /// Clears the currently hovered number.
-    pub fn clear_hovered_number(&mut self) {
-        self.last_content.last_hovered_number = None;
-    }
-
     pub fn find_word_at_mouse_position(&self, e: &MouseDownEvent) -> Option<(String, RangeInclusive<AlacPoint>)> {
         let position = e.position - self.last_content.terminal_bounds.bounds.origin;
         let point = grid_point(
@@ -3860,6 +3769,18 @@ impl Terminal {
             self.last_content.display_offset,
         );
         self.find_word_at_grid_point(point)
+    }
+
+    pub fn find_number_at_mouse_position(&self, e: &MouseDownEvent) -> Option<number_hover::ParsedNumber> {
+        let position = e.position - self.last_content.terminal_bounds.bounds.origin;
+        let term = self.term.lock();
+        let point = grid_point(
+            position,
+            self.last_content.terminal_bounds,
+            self.last_content.display_offset,
+        )
+        .grid_clamp(&*term, Boundary::Grid);
+        number_hover::find_number_at_position(&*term, point)
     }
 
     pub fn select_word_at_event_position(&mut self, e: &MouseDownEvent) {

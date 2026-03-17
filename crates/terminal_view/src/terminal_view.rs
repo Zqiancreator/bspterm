@@ -297,8 +297,6 @@ pub struct TerminalView {
     custom_title: Option<String>,
     hover: Option<HoverTarget>,
     hover_tooltip_update: Task<()>,
-    /// Timer task for delayed number hover highlight
-    number_hover_task: Option<Task<()>>,
     /// Active number popover (non-pinned)
     active_number_popover: Option<number_popover::NumberPopover>,
     /// Pinned number popovers
@@ -518,7 +516,6 @@ impl TerminalView {
             blinking_terminal_enabled: false,
             hover: None,
             hover_tooltip_update: Task::ready(()),
-            number_hover_task: None,
             active_number_popover: None,
             pinned_number_popovers: Vec::new(),
             mode: TerminalMode::Standalone,
@@ -624,69 +621,9 @@ impl TerminalView {
         }
     }
 
-    /// Schedules a delayed number hover check at the given position.
-    /// The check only runs if the mouse stays still for the delay period.
-    pub fn schedule_number_hover(
-        &mut self,
-        position: Point<Pixels>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        const NUMBER_HOVER_DELAY_MS: u64 = 300;
-
-        let terminal = self.terminal.clone();
-        self.number_hover_task = Some(cx.spawn(async move |_this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(NUMBER_HOVER_DELAY_MS))
-                .await;
-
-            terminal.update(cx, |terminal, cx| {
-                terminal.schedule_find_number(position);
-                cx.notify();
-            });
-        }));
-    }
-
-    /// Clears the number hover state and cancels any pending hover task.
-    pub fn clear_number_hover(&mut self, cx: &mut Context<Self>) {
-        self.number_hover_task = None;
-        self.terminal.update(cx, |terminal, _| {
-            terminal.clear_hovered_number();
-        });
-    }
-
-    /// Shows a number popover at the position of the hovered number (calculated from grid coordinates).
-    pub fn show_number_popover_at_hovered_number(&mut self, cx: &mut Context<Self>) {
-        let (hovered_number, terminal_bounds, display_offset) = {
-            let terminal = self.terminal.read(cx);
-            let hovered_number = match terminal.last_content.last_hovered_number.clone() {
-                Some(num) => num,
-                None => return,
-            };
-            let terminal_bounds = terminal.last_content.terminal_bounds;
-            let display_offset = terminal.last_content.display_offset;
-            (hovered_number, terminal_bounds, display_offset)
-        };
-
-        // Calculate pixel position from the start of the number in the grid
-        let start_point = hovered_number.parsed.word_match.start();
-        let viewport_line = start_point.line.0 + display_offset as i32;
-
-        let position = Point {
-            x: terminal_bounds.bounds.origin.x
-                + start_point.column.0 as f32 * terminal_bounds.cell_width,
-            y: terminal_bounds.bounds.origin.y
-                + viewport_line as f32 * terminal_bounds.line_height
-                + terminal_bounds.line_height, // Position below the number
-        };
-
-        self.active_number_popover = Some(NumberPopover::new(hovered_number.parsed, position));
-
-        // Clear the hover state to avoid visual confusion
-        self.terminal.update(cx, |terminal, _| {
-            terminal.clear_hovered_number();
-        });
-
+    /// Shows a number popover for a parsed number at the given pixel position.
+    pub fn show_number_popover(&mut self, parsed: terminal::ParsedNumber, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.active_number_popover = Some(NumberPopover::new(parsed, position));
         cx.notify();
     }
 
@@ -917,6 +854,7 @@ impl TerminalView {
         &mut self,
         position: Point<Pixels>,
         highlight_text: Option<String>,
+        parsed_number: Option<terminal::ParsedNumber>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -935,6 +873,9 @@ impl TerminalView {
         let has_connection_info = terminal.connection_info().is_some();
         let has_highlight_text = highlight_text.is_some();
         let has_persistent_highlights = terminal.has_word_highlights();
+        let has_parsed_number = parsed_number.is_some();
+        let terminal_view_handle = cx.entity().clone();
+        let menu_position = position;
 
         let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
             menu.context(self.focus_handle.clone())
@@ -956,6 +897,15 @@ impl TerminalView {
                 })
                 .when(has_persistent_highlights, |menu| {
                     menu.action(t("terminal.clear_highlights"), Box::new(ClearWordHighlights))
+                })
+                .when(has_parsed_number, |menu| {
+                    let parsed_number = parsed_number.clone().unwrap();
+                    let terminal_view_handle = terminal_view_handle.clone();
+                    menu.entry(t("terminal.parse_number"), None, move |_window, cx| {
+                        terminal_view_handle.update(cx, |view, cx| {
+                            view.show_number_popover(parsed_number.clone(), menu_position, cx);
+                        });
+                    })
                 })
                 .when(assistant_enabled, |menu| {
                     menu.separator()
@@ -4118,12 +4068,7 @@ impl Render for TerminalView {
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     if !this.terminal.read(cx).mouse_mode(event.modifiers.shift) {
-                        // Check if we right-clicked on a hovered number - show popover instead of context menu
-                        if this.terminal.read(cx).last_content.last_hovered_number.is_some() {
-                            this.show_number_popover_at_hovered_number(cx);
-                            cx.notify();
-                            return;
-                        }
+                        let parsed_number = this.terminal.read(cx).find_number_at_mouse_position(event);
 
                         let highlight_text = {
                             let terminal = this.terminal.read(cx);
@@ -4139,7 +4084,7 @@ impl Render for TerminalView {
                                 terminal.select_word_at_event_position(event);
                             });
                         };
-                        this.deploy_context_menu(event.position, highlight_text, window, cx);
+                        this.deploy_context_menu(event.position, highlight_text, parsed_number, window, cx);
                         cx.notify();
                     }
                 }),

@@ -376,6 +376,7 @@ terminal:
   switch_to_telnet: "Switch to Telnet"
   highlight_word: "Highlight"
   clear_highlights: "Clear Highlights"
+  parse_number: "Parse Number"
 
 # Script errors
 script:
