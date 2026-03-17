@@ -374,6 +374,8 @@ terminal:
   trace_call_graph: "Trace Call Graph"
   switch_to_ssh: "Switch to SSH"
   switch_to_telnet: "Switch to Telnet"
+  highlight_word: "Highlight"
+  clear_highlights: "Clear Highlights"
 
 # Script errors
 script:

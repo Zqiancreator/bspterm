@@ -34,12 +34,72 @@ use util::ResultExt;
 use workspace::Workspace;
 
 use std::mem;
+use std::sync::LazyLock;
 use std::{fmt::Debug, ops::RangeInclusive, rc::Rc};
 
 use crate::{
     BlockContext, BlockProperties, ContentMode, NumberPopoverElement, RowDecoration, RowDecorator,
     TerminalMode, TerminalView, TimestampGapDecorator,
 };
+
+fn find_visible_occurrences(cells: &[IndexedCell], text: &str) -> Vec<RangeInclusive<AlacPoint>> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+    let text_chars: Vec<char> = text.chars().collect();
+    let text_len = text_chars.len();
+
+    // Group cells by line
+    let mut line_start = 0;
+    while line_start < cells.len() {
+        let current_line = cells[line_start].point.line;
+        let mut line_end = line_start;
+        while line_end < cells.len() && cells[line_end].point.line == current_line {
+            line_end += 1;
+        }
+
+        // Sliding window match within this line
+        let line_cells = &cells[line_start..line_end];
+        if line_cells.len() >= text_len {
+            for i in 0..=line_cells.len() - text_len {
+                let mut matched = true;
+                for j in 0..text_len {
+                    if line_cells[i + j].cell.c != text_chars[j] {
+                        matched = false;
+                        break;
+                    }
+                }
+                if matched {
+                    let start = line_cells[i].point;
+                    let end = line_cells[i + text_len - 1].point;
+                    results.push(start..=end);
+                }
+            }
+        }
+
+        line_start = line_end;
+    }
+
+    results
+}
+
+fn word_highlight_colors() -> &'static [Hsla] {
+    static COLORS: LazyLock<Vec<Hsla>> = LazyLock::new(|| {
+        vec![
+            gpui::hsla(55.0 / 360.0, 0.8, 0.5, 0.35),
+            gpui::hsla(120.0 / 360.0, 0.6, 0.4, 0.35),
+            gpui::hsla(200.0 / 360.0, 0.7, 0.5, 0.35),
+            gpui::hsla(280.0 / 360.0, 0.6, 0.5, 0.35),
+            gpui::hsla(15.0 / 360.0, 0.8, 0.5, 0.35),
+            gpui::hsla(340.0 / 360.0, 0.7, 0.5, 0.35),
+            gpui::hsla(170.0 / 360.0, 0.6, 0.4, 0.35),
+            gpui::hsla(40.0 / 360.0, 0.5, 0.6, 0.35),
+        ]
+    });
+    &COLORS
+}
 
 /// Gutter dimensions for line numbers and timestamps.
 #[derive(Clone, Debug)]
@@ -1787,6 +1847,39 @@ impl Element for TerminalElement {
                         AlacColumn(columns.saturating_sub(1)),
                     );
                     relative_highlighted_ranges.push((start..=end, highlight_color));
+                }
+
+                // Word highlight: selection text matching (temporary)
+                let terminal_content = &self.terminal.read(cx).last_content;
+                if let Some(ref selection_text) = terminal_content.selection_text {
+                    if !selection_text.is_empty() && selection_text.len() <= 200 {
+                        let color = gpui::hsla(0.0, 0.0, 0.5, 0.2);
+                        for range in find_visible_occurrences(&terminal_content.cells, selection_text) {
+                            relative_highlighted_ranges.push((range, color));
+                        }
+                    }
+                }
+
+                // Word highlight: clicked word matching (temporary)
+                let terminal_content = &self.terminal.read(cx).last_content;
+                if terminal_content.selection.is_none() {
+                    if let Some(ref clicked_word) = terminal_content.clicked_word {
+                        if !clicked_word.is_empty() {
+                            let color = gpui::hsla(0.0, 0.0, 0.5, 0.2);
+                            for range in find_visible_occurrences(&terminal_content.cells, clicked_word) {
+                                relative_highlighted_ranges.push((range, color));
+                            }
+                        }
+                    }
+                }
+
+                // Word highlight: persistent highlights
+                let highlight_colors = word_highlight_colors();
+                for wh in &terminal_content.word_highlights {
+                    let color = highlight_colors[wh.color_index % highlight_colors.len()];
+                    for range in find_visible_occurrences(&terminal_content.cells, &wh.text) {
+                        relative_highlighted_ranges.push((range, color));
+                    }
                 }
 
                 // then have that representation be converted to the appropriate highlight data structure

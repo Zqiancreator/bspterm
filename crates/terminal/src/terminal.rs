@@ -569,6 +569,8 @@ impl TerminalBuilder {
             autosuggestion: None,
             autosuggestion_needs_update: false,
             highlighted_line: None,
+            word_highlights: Vec::new(),
+            next_word_highlight_color_index: 0,
         };
 
         Ok(TerminalBuilder {
@@ -826,6 +828,8 @@ impl TerminalBuilder {
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
                 highlighted_line: None,
+                word_highlights: Vec::new(),
+                next_word_highlight_color_index: 0,
             };
 
             if !activation_script.is_empty() && no_task {
@@ -1052,6 +1056,8 @@ impl TerminalBuilder {
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
                 highlighted_line: None,
+                word_highlights: Vec::new(),
+                next_word_highlight_color_index: 0,
             };
 
             terminal.init_rule_engine();
@@ -1245,6 +1251,8 @@ impl TerminalBuilder {
                 autosuggestion: None,
                 autosuggestion_needs_update: false,
                 highlighted_line: None,
+                word_highlights: Vec::new(),
+                next_word_highlight_color_index: 0,
             };
 
             terminal.init_rule_engine();
@@ -1433,6 +1441,8 @@ impl TerminalBuilder {
             autosuggestion: None,
             autosuggestion_needs_update: false,
             highlighted_line: None,
+            word_highlights: Vec::new(),
+            next_word_highlight_color_index: 0,
         };
 
         terminal.init_rule_engine();
@@ -1493,6 +1503,8 @@ pub struct TerminalContent {
     pub terminal_bounds: TerminalBounds,
     pub last_hovered_word: Option<HoveredWord>,
     pub last_hovered_number: Option<HoveredNumber>,
+    pub clicked_word: Option<String>,
+    pub word_highlights: Vec<WordHighlight>,
     pub scrolled_to_top: bool,
     pub scrolled_to_bottom: bool,
 }
@@ -1508,6 +1520,12 @@ pub struct HoveredWord {
 pub struct HoveredNumber {
     pub parsed: number_hover::ParsedNumber,
     pub id: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WordHighlight {
+    pub text: String,
+    pub color_index: usize,
 }
 
 impl Default for TerminalContent {
@@ -1526,6 +1544,8 @@ impl Default for TerminalContent {
             terminal_bounds: Default::default(),
             last_hovered_word: None,
             last_hovered_number: None,
+            clicked_word: None,
+            word_highlights: Vec::new(),
             scrolled_to_top: false,
             scrolled_to_bottom: false,
         }
@@ -1701,6 +1721,10 @@ pub struct Terminal {
     autosuggestion_needs_update: bool,
     /// Line to highlight temporarily (absolute line number, used by outline jump).
     pub highlighted_line: Option<i64>,
+    /// Persistent word highlights (VSCode-style).
+    word_highlights: Vec<WordHighlight>,
+    /// Next color index for word highlights.
+    next_word_highlight_color_index: usize,
 }
 
 struct CopyTemplate {
@@ -2196,6 +2220,79 @@ impl Terminal {
         let res = self.next_link_id;
         self.next_link_id = self.next_link_id.wrapping_add(1);
         res
+    }
+
+    pub fn find_word_at_grid_point(&self, point: AlacPoint) -> Option<(String, RangeInclusive<AlacPoint>)> {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let line = point.line;
+        let col = point.column;
+
+        let c = grid[point].c;
+
+        if c == ' ' || c == '\0' {
+            return None;
+        }
+
+        let escape_chars = ",│`|:\"' ()[]{}<>\t.";
+        if escape_chars.contains(c) {
+            return None;
+        }
+
+        let num_cols = grid.columns();
+
+        let mut start_col = col.0;
+        while start_col > 0 {
+            let prev_point = AlacPoint::new(line, Column(start_col - 1));
+            let prev_c = grid[prev_point].c;
+            if prev_c == ' ' || prev_c == '\0' || escape_chars.contains(prev_c) {
+                break;
+            }
+            start_col -= 1;
+        }
+
+        let mut end_col = col.0;
+        while end_col < num_cols - 1 {
+            let next_point = AlacPoint::new(line, Column(end_col + 1));
+            let next_c = grid[next_point].c;
+            if next_c == ' ' || next_c == '\0' || escape_chars.contains(next_c) {
+                break;
+            }
+            end_col += 1;
+        }
+
+        let mut word = String::with_capacity(end_col - start_col + 1);
+        for col_idx in start_col..=end_col {
+            let pt = AlacPoint::new(line, Column(col_idx));
+            word.push(grid[pt].c);
+        }
+
+        if word.is_empty() {
+            return None;
+        }
+
+        let range = AlacPoint::new(line, Column(start_col))..=AlacPoint::new(line, Column(end_col));
+        Some((word, range))
+    }
+
+    pub fn add_word_highlight(&mut self, text: String) {
+        if self.word_highlights.iter().any(|wh| wh.text == text) {
+            return;
+        }
+        let color_index = self.next_word_highlight_color_index;
+        self.next_word_highlight_color_index = self.next_word_highlight_color_index.wrapping_add(1);
+        self.word_highlights.push(WordHighlight { text, color_index });
+        self.last_content.word_highlights = self.word_highlights.clone();
+    }
+
+    pub fn clear_word_highlights(&mut self) {
+        self.word_highlights.clear();
+        self.last_content.word_highlights.clear();
+        self.next_word_highlight_color_index = 0;
+    }
+
+    pub fn has_word_highlights(&self) -> bool {
+        !self.word_highlights.is_empty()
     }
 
     pub fn last_content(&self) -> &TerminalContent {
@@ -3528,6 +3625,8 @@ impl Terminal {
             terminal_bounds: last_content.terminal_bounds,
             last_hovered_word: last_content.last_hovered_word.clone(),
             last_hovered_number: last_content.last_hovered_number.clone(),
+            clicked_word: last_content.clicked_word.clone(),
+            word_highlights: last_content.word_highlights.clone(),
             scrolled_to_top: content.display_offset == term.history_size(),
             scrolled_to_bottom: content.display_offset == 0,
         }
@@ -3753,6 +3852,16 @@ impl Terminal {
         self.last_content.last_hovered_number = None;
     }
 
+    pub fn find_word_at_mouse_position(&self, e: &MouseDownEvent) -> Option<(String, RangeInclusive<AlacPoint>)> {
+        let position = e.position - self.last_content.terminal_bounds.bounds.origin;
+        let point = grid_point(
+            position,
+            self.last_content.terminal_bounds,
+            self.last_content.display_offset,
+        );
+        self.find_word_at_grid_point(point)
+    }
+
     pub fn select_word_at_event_position(&mut self, e: &MouseDownEvent) {
         let position = e.position - self.last_content.terminal_bounds.bounds.origin;
         let (point, side) = grid_point_and_side(
@@ -3958,6 +4067,15 @@ impl Terminal {
                         .push_back(InternalEvent::FindHyperlink(position, true));
                 }
             }
+        }
+
+        if e.button == MouseButton::Left {
+            let point = grid_point(
+                position,
+                self.last_content.terminal_bounds,
+                self.last_content.display_offset,
+            );
+            self.last_content.clicked_word = self.find_word_at_grid_point(point).map(|(word, _)| word);
         }
 
         self.selection_phase = SelectionPhase::Ended;

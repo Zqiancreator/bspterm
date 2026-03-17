@@ -213,6 +213,10 @@ actions!(
         ExportOutputToBuffer,
         /// Clears the autosuggestion command history pool.
         ClearAutosuggestionHistory,
+        /// Adds a persistent word highlight for the selected text or clicked word.
+        HighlightWord,
+        /// Clears all persistent word highlights.
+        ClearWordHighlights,
     ]
 );
 
@@ -912,6 +916,7 @@ impl TerminalView {
     pub fn deploy_context_menu(
         &mut self,
         position: Point<Pixels>,
+        highlight_text: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -928,6 +933,8 @@ impl TerminalView {
             .is_some_and(|text| !text.is_empty());
         let is_disconnected = terminal.is_disconnected();
         let has_connection_info = terminal.connection_info().is_some();
+        let has_highlight_text = highlight_text.is_some();
+        let has_persistent_highlights = terminal.has_word_highlights();
 
         let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
             menu.context(self.focus_handle.clone())
@@ -944,6 +951,12 @@ impl TerminalView {
                 .action(t("terminal.export_all_output"), Box::new(ExportOutputToBuffer))
                 .separator()
                 .action(t("terminal.trace_call_graph"), Box::new(TraceCallGraph))
+                .when(has_highlight_text, |menu| {
+                    menu.action(t("terminal.highlight_word"), Box::new(HighlightWord))
+                })
+                .when(has_persistent_highlights, |menu| {
+                    menu.action(t("terminal.clear_highlights"), Box::new(ClearWordHighlights))
+                })
                 .when(assistant_enabled, |menu| {
                     menu.separator()
                         .action(t("terminal.inline_assist"), Box::new(InlineAssist::default()))
@@ -2761,6 +2774,41 @@ print(output)
         cx.notify();
     }
 
+    fn highlight_word(
+        &mut self,
+        _: &HighlightWord,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = {
+            let terminal = self.terminal.read(cx);
+            terminal
+                .last_content
+                .selection_text
+                .clone()
+                .filter(|t| !t.is_empty())
+                .or_else(|| terminal.last_content.clicked_word.clone())
+        };
+        if let Some(text) = text {
+            self.terminal.update(cx, |terminal, _| {
+                terminal.add_word_highlight(text);
+            });
+            cx.notify();
+        }
+    }
+
+    fn clear_word_highlights(
+        &mut self,
+        _: &ClearWordHighlights,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal.update(cx, |terminal, _| {
+            terminal.clear_word_highlights();
+        });
+        cx.notify();
+    }
+
     fn clear_scrollback(&mut self, _: &ClearScrollback, _: &mut Window, cx: &mut Context<Self>) {
         self.scroll_top = px(0.);
         self.terminal.update(cx, |term, _| term.clear_scrollback());
@@ -4063,6 +4111,8 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::run_script_shortcut))
             .on_action(cx.listener(Self::trace_call_graph))
             .on_action(cx.listener(Self::clear_autosuggestion_history))
+            .on_action(cx.listener(Self::highlight_word))
+            .on_action(cx.listener(Self::clear_word_highlights))
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(
                 MouseButton::Right,
@@ -4075,12 +4125,21 @@ impl Render for TerminalView {
                             return;
                         }
 
+                        let highlight_text = {
+                            let terminal = this.terminal.read(cx);
+                            if terminal.last_content.selection_text.as_ref().is_some_and(|t| !t.is_empty()) {
+                                terminal.last_content.selection_text.clone()
+                            } else {
+                                terminal.find_word_at_mouse_position(event).map(|(word, _)| word)
+                            }
+                        };
+
                         if this.terminal.read(cx).last_content.selection.is_none() {
                             this.terminal.update(cx, |terminal, _| {
                                 terminal.select_word_at_event_position(event);
                             });
                         };
-                        this.deploy_context_menu(event.position, window, cx);
+                        this.deploy_context_menu(event.position, highlight_text, window, cx);
                         cx.notify();
                     }
                 }),

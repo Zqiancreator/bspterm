@@ -374,6 +374,8 @@ terminal:
   trace_call_graph: "追踪调用图"
   switch_to_ssh: "切换为 SSH"
   switch_to_telnet: "切换为 Telnet"
+  highlight_word: "高亮"
+  clear_highlights: "清除高亮"
 
 # Script errors
 script:

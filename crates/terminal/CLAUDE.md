@@ -51,6 +51,7 @@ src/
 | `HighlightStore` | Highlight rules with priority sorting |
 | `ButtonBarStore` | Button bar configurations |
 | `Event` | Terminal events (title changed, disconnected, login complete) |
+| `WordHighlight` | Persistent word highlight entry (text + color_index) |
 
 ## Dependencies
 

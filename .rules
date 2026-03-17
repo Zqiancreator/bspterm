@@ -179,6 +179,7 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Multiline Paste**: `terminal_view.rs` paste handler auto-detects bracketed paste mode — enabled: one-shot send (standard behavior); disabled: line-by-line send with 50ms delay (for GDB, network CLI etc.). Uses `Terminal::paste_line()` + `is_bracketed_paste_mode()`
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
 - **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
+- **Word Highlight (VSCode-style)**: `terminal.rs` (`WordHighlight`, `find_word_at_grid_point()`) + `terminal_element.rs` (`find_visible_occurrences()`) + `terminal_view.rs` (`HighlightWord`/`ClearWordHighlights` actions). Four scenarios: (1) select text → temporary highlight of all matching occurrences, (2) select text → right-click "Highlight" → persistent highlight, (3) click a word → temporary highlight of matching words, (4) right-click word → "Highlight" → persistent highlight. Persistent highlights use 8-color rotation (`word_highlight_colors()`), not saved across restart. Word boundaries use `semantic_escape_chars`.
 
 ## Terminal Autosuggestion (Fish-style)
 

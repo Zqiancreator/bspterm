@@ -32,6 +32,7 @@ src/
 | `TerminalInputHandler` | IME and keyboard input handler |
 | `SshConnectModal` | SSH connection dialog |
 | `SendText` / `SendKeystroke` | Actions to send input to terminal |
+| `HighlightWord` / `ClearWordHighlights` | Actions for persistent word highlighting |
 
 ## Dependencies
 
