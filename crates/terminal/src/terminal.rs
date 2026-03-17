@@ -491,6 +491,7 @@ impl TerminalBuilder {
         let config = Config {
             scrolling_history,
             default_cursor_style,
+            semantic_escape_chars: ",│`|:\"' ()[]{}<>\t.".to_owned(),
             ..Config::default()
         };
 
@@ -703,6 +704,7 @@ impl TerminalBuilder {
             let config = Config {
                 scrolling_history,
                 default_cursor_style,
+                semantic_escape_chars: ",│`|:\"' ()[]{}<>\t.".to_owned(),
                 ..Config::default()
             };
 
@@ -945,6 +947,7 @@ impl TerminalBuilder {
             let config = Config {
                 scrolling_history,
                 default_cursor_style,
+                semantic_escape_chars: ",│`|:\"' ()[]{}<>\t.".to_owned(),
                 ..Config::default()
             };
 
@@ -1135,6 +1138,7 @@ impl TerminalBuilder {
             let config = Config {
                 scrolling_history,
                 default_cursor_style,
+                semantic_escape_chars: ",│`|:\"' ()[]{}<>\t.".to_owned(),
                 ..Config::default()
             };
 
@@ -1352,6 +1356,7 @@ impl TerminalBuilder {
         let config = Config {
             scrolling_history,
             default_cursor_style,
+            semantic_escape_chars: ",│`|:\"' ()[]{}<>\t.".to_owned(),
             ..Config::default()
         };
 
