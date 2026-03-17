@@ -97,7 +97,8 @@ use shortcut_bar::{AddShortcutModal, EditShortcutModal, ShortcutBarConfigModal};
 use terminal::{
     SessionStoreEntity, get_action_label,
     ButtonBarStoreEntity, ButtonBarStoreEvent, FunctionProtocol,
-    FunctionStoreEntity, ShortcutBarStoreEntity, ShortcutBarStoreEvent, SuggestionHistoryEntity,
+    FunctionStoreEntity, RuleStoreEntity, RuleStoreEvent,
+    ShortcutBarStoreEntity, ShortcutBarStoreEvent, SuggestionHistoryEntity,
     ALL_SYSTEM_ACTIONS,
 };
 use shortcut_bar::get_keybindings_for_action;
@@ -320,6 +321,7 @@ pub struct TerminalView {
     selected_function: Option<(uuid::Uuid, PathBuf)>,
     /// Drag target for function bar reordering
     function_drag_target: Option<FunctionDragTarget>,
+    _rule_store_subscription: Option<Subscription>,
     _shortcut_bar_subscription: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
     _terminal_subscriptions: Vec<Subscription>,
@@ -478,6 +480,15 @@ impl TerminalView {
             })
         });
 
+        let rule_store_subscription = RuleStoreEntity::try_global(cx).map(|store| {
+            cx.subscribe(&store, |this, emitter, _event: &RuleStoreEvent, cx| {
+                let rules = emitter.read(cx).rules().to_vec();
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.refresh_rule_engine(&rules);
+                });
+            })
+        });
+
         let shortcut_bar_subscription = ShortcutBarStoreEntity::try_global(cx).map(|store| {
             cx.subscribe(&store, |_this, _, _event: &ShortcutBarStoreEvent, cx| {
                 cx.notify();
@@ -528,6 +539,7 @@ impl TerminalView {
             button_drag_target: None,
             selected_function: None,
             function_drag_target: None,
+            _rule_store_subscription: rule_store_subscription,
             _shortcut_bar_subscription: shortcut_bar_subscription,
             _subscriptions: subscriptions,
             _terminal_subscriptions: terminal_subscriptions,

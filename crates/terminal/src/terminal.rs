@@ -4859,6 +4859,15 @@ impl Terminal {
         }
     }
 
+    /// Rebuild the rule engine from the given rules list.
+    /// Used when rules are toggled at runtime so we don't need to re-read from disk.
+    pub fn refresh_rule_engine(&mut self, rules: &[AutomationRule]) {
+        if let Some(connection_info) = &self.connection_info {
+            let enabled_rules: Vec<_> = rules.iter().filter(|r| r.enabled).cloned().collect();
+            self.rule_engine = Some(rule_engine::RuleEngine::new(connection_info, &enabled_rules));
+        }
+    }
+
     fn init_session_logger(
         &mut self,
         session_logging_settings: terminal_settings::SessionLoggingSettings,
