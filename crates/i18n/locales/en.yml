@@ -188,6 +188,8 @@ remote_explorer:
   sort_addition_order: "Addition Order"
   sort_name_ascending: "Sort by Name"
   new_session: "New Session"
+  new_ssh_session: "New SSH Session"
+  new_telnet_session: "New Telnet Session"
   pin_group: "Pin Group"
   unpin_group: "Unpin Group"
   switch_to_ssh: "Switch to SSH"
@@ -307,6 +309,8 @@ session_edit:
   auth_private_key: "Private Key"
   auth_agent: "SSH Agent"
   private_key_path: "Private Key Path"
+  title_new_ssh: "New SSH Session"
+  title_new_telnet: "New Telnet Session"
   title_edit_protocol: "Edit {} Session"
   terminal_type: "Terminal Type"
 

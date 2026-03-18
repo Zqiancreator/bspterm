@@ -159,8 +159,26 @@ impl SessionEditModal {
         }
     }
 
-    pub fn new_create(
+    pub fn new_create_ssh(
         parent_group_id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_create(parent_group_id, ProtocolType::Ssh, 22, window, cx)
+    }
+
+    pub fn new_create_telnet(
+        parent_group_id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_create(parent_group_id, ProtocolType::Telnet, 23, window, cx)
+    }
+
+    fn new_create(
+        parent_group_id: Option<Uuid>,
+        protocol: ProtocolType,
+        default_port: u16,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -181,7 +199,7 @@ impl SessionEditModal {
 
         let port_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_text("22", window, cx);
+            editor.set_text(default_port.to_string(), window, cx);
             editor.set_placeholder_text(&t("session_edit.port"), window, cx);
             editor
         });
@@ -222,7 +240,7 @@ impl SessionEditModal {
                 }
             });
 
-        window.focus(&name_editor.focus_handle(cx), cx);
+        window.focus(&host_editor.focus_handle(cx), cx);
 
         Self {
             session_id: Uuid::new_v4(),
@@ -235,7 +253,7 @@ impl SessionEditModal {
             selected_terminal_type: None,
             selected_credential: None,
             programmatic_change_count: 0,
-            protocol: ProtocolType::Ssh,
+            protocol,
             is_create_mode: true,
             parent_group_id,
             focus_handle,
@@ -244,14 +262,23 @@ impl SessionEditModal {
     }
 
     fn save(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let name = self.name_editor.read(cx).text(cx);
         let host = self.host_editor.read(cx).text(cx);
+        let default_port: u16 = if self.protocol == ProtocolType::Ssh { 22 } else { 23 };
         let port = self
             .port_editor
             .read(cx)
             .text(cx)
             .parse::<u16>()
-            .unwrap_or(if self.protocol == ProtocolType::Ssh { 22 } else { 23 });
+            .unwrap_or(default_port);
+        let name = if self.is_create_mode {
+            if port == default_port {
+                host.clone()
+            } else {
+                format!("{}:{}", host, port)
+            }
+        } else {
+            self.name_editor.read(cx).text(cx)
+        };
         let username = self.username_editor.read(cx).text(cx);
         let password = self.password_editor.read(cx).text(cx);
         let terminal_type = self.selected_terminal_type.clone();
@@ -446,7 +473,10 @@ impl Render for SessionEditModal {
         };
 
         let title = if self.is_create_mode {
-            t("session_edit.title_new").to_string()
+            match self.protocol {
+                ProtocolType::Ssh => t("session_edit.title_new_ssh").to_string(),
+                ProtocolType::Telnet => t("session_edit.title_new_telnet").to_string(),
+            }
         } else {
             t("session_edit.title_edit_protocol").replace("{}", protocol_label)
         };
@@ -538,72 +568,23 @@ impl Render for SessionEditModal {
                     .w_full()
                     .p_2()
                     .gap_2()
-                    .when(self.is_create_mode, |this| {
-                        let weak_self = cx.weak_entity();
-                        let protocol_menu = ContextMenu::build(window, cx, move |menu, _, _| {
-                            let weak_for_ssh = weak_self.clone();
-                            let weak_for_telnet = weak_self.clone();
-                            menu.entry("SSH", None, move |window, cx| {
-                                weak_for_ssh
-                                    .update(cx, |this, cx| {
-                                        if this.protocol != ProtocolType::Ssh {
-                                            this.protocol = ProtocolType::Ssh;
-                                            this.port_editor.update(cx, |editor, cx| {
-                                                editor.set_text("22", window, cx);
-                                            });
-                                            cx.notify();
-                                        }
-                                    })
-                                    .ok();
-                            })
-                            .entry("Telnet", None, move |window, cx| {
-                                weak_for_telnet
-                                    .update(cx, |this, cx| {
-                                        if this.protocol != ProtocolType::Telnet {
-                                            this.protocol = ProtocolType::Telnet;
-                                            this.port_editor.update(cx, |editor, cx| {
-                                                editor.set_text("23", window, cx);
-                                            });
-                                            cx.notify();
-                                        }
-                                    })
-                                    .ok();
-                            })
-                        });
+                    .when(!self.is_create_mode, |this| {
                         this.child(
                             v_flex()
                                 .gap_1()
+                                .child(Label::new(t("common.name")).size(LabelSize::Small).color(Color::Muted))
                                 .child(
-                                    Label::new(t("session_edit.protocol"))
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .child(
-                                    DropdownMenu::new(
-                                        "protocol",
-                                        protocol_label,
-                                        protocol_menu,
-                                    )
-                                    .full_width(true)
-                                    .style(DropdownStyle::Outlined),
+                                    div()
+                                        .w_full()
+                                        .border_1()
+                                        .border_color(border_color)
+                                        .rounded_sm()
+                                        .px_1()
+                                        .py_px()
+                                        .child(self.name_editor.clone()),
                                 ),
                         )
                     })
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new(t("common.name")).size(LabelSize::Small).color(Color::Muted))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .rounded_sm()
-                                    .px_1()
-                                    .py_px()
-                                    .child(self.name_editor.clone()),
-                            ),
-                    )
                     .child(
                         h_flex()
                             .gap_2()

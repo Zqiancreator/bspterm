@@ -188,6 +188,8 @@ remote_explorer:
   sort_addition_order: "添加顺序"
   sort_name_ascending: "名称排序"
   new_session: "新建会话"
+  new_ssh_session: "新建 SSH 会话"
+  new_telnet_session: "新建 Telnet 会话"
   pin_group: "置顶分组"
   unpin_group: "取消置顶"
   switch_to_ssh: "切换为 SSH"
@@ -307,6 +309,8 @@ session_edit:
   auth_private_key: "私钥"
   auth_agent: "SSH Agent"
   private_key_path: "私钥路径"
+  title_new_ssh: "新建 SSH 会话"
+  title_new_telnet: "新建 Telnet 会话"
   title_edit_protocol: "编辑 {} 会话"
   terminal_type: "终端类型"
 

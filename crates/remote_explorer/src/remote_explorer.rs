@@ -871,7 +871,8 @@ impl RemoteExplorer {
                 let session_store_for_copy = session_store_entity.clone();
                 ContextMenu::build(window, cx, move |menu, _window, _cx| {
                     let workspace_for_edit = workspace.clone();
-                    let workspace_for_new = workspace_for_edit.clone();
+                    let workspace_for_new_ssh = workspace_for_edit.clone();
+                    let workspace_for_new_telnet = workspace_for_edit.clone();
                     let pin_label = if is_pinned {
                         t("remote_explorer.unpin_group")
                     } else {
@@ -883,11 +884,20 @@ impl RemoteExplorer {
                             store.toggle_pin_group(entry_id, cx);
                         });
                     })
-                    .entry(t("remote_explorer.new_session"), None, move |window, cx| {
-                        if let Some(workspace) = workspace_for_new.upgrade() {
+                    .entry(t("remote_explorer.new_ssh_session"), None, move |window, cx| {
+                        if let Some(workspace) = workspace_for_new_ssh.upgrade() {
                             workspace.update(cx, |ws, cx| {
                                 ws.toggle_modal(window, cx, |window, cx| {
-                                    SessionEditModal::new_create(Some(entry_id), window, cx)
+                                    SessionEditModal::new_create_ssh(Some(entry_id), window, cx)
+                                });
+                            });
+                        }
+                    })
+                    .entry(t("remote_explorer.new_telnet_session"), None, move |window, cx| {
+                        if let Some(workspace) = workspace_for_new_telnet.upgrade() {
+                            workspace.update(cx, |ws, cx| {
+                                ws.toggle_modal(window, cx, |window, cx| {
+                                    SessionEditModal::new_create_telnet(Some(entry_id), window, cx)
                                 });
                             });
                         }
