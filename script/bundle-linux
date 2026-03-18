@@ -140,6 +140,13 @@ mkdir -p "${bspterm_dir}/bin" "${bspterm_dir}/libexec"
 cp "${target_dir}/${target_triple}/release/bspterm" "${bspterm_dir}/libexec/bspterm-editor"
 cp "${target_dir}/${target_triple}/release/cli" "${bspterm_dir}/bin/bspterm"
 
+# Bundled Python
+if [ ! -d "target/python-dist" ]; then
+    script/bundle-python
+fi
+mkdir -p "${bspterm_dir}/lib/python"
+cp -r target/python-dist/* "${bspterm_dir}/lib/python/"
+
 # Libs
 find_libs() {
     ldd ${target_dir}/${target_triple}/release/bspterm |\

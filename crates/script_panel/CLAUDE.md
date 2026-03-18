@@ -27,6 +27,7 @@ src/
 
 ## Dependencies
 
+- `python_runtime` - Python interpreter discovery (bundled → system fallback)
 - `terminal_scripting` - ScriptingServer, terminal registry
 - `workspace` - Panel framework, ModalView
 - `gpui` - UI primitives
@@ -93,9 +94,10 @@ cargo test -p script_panel script_params  # Parameter parsing tests
 
 - Scripts directory: `~/.config/bspterm/scripts/`
 - `bspterm.py` is auto-installed but excluded from script list
+- Python executable resolved via `python_runtime::python_executable()` (bundled first, then system PATH)
 - Environment variables passed to scripts:
   - `BSPTERM_SOCKET` - Unix socket connection string
-  - `PYTHONPATH` - Points to scripts directory
+  - `PYTHONPATH` - Includes scripts directory + user site-packages (`python_runtime::user_site_packages()`)
   - `BSPTERM_CURRENT_TERMINAL` - Focused terminal UUID
   - `BSPTERM_PARAM_*` - Script parameters (uppercase names)
 - Cross-platform I/O:

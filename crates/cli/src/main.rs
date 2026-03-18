@@ -134,6 +134,12 @@ struct Args {
     /// by having Zed act like netcat communicating over a Unix socket.
     #[arg(long, hide = true)]
     askpass: Option<String>,
+
+    /// Run the bundled Python interpreter with the given arguments.
+    ///
+    /// Example: `bspterm --python -m pip install paramiko`
+    #[arg(long, trailing_var_arg = true, num_args = 0..)]
+    python: Vec<String>,
 }
 
 /// Parses a path containing a position (e.g. `path:line:column`)
@@ -475,6 +481,19 @@ fn main() -> Result<()> {
     if let Some(socket) = &args.askpass {
         askpass::main(socket);
         return Ok(());
+    }
+
+    // `bspterm --python` forwards to the bundled/system Python interpreter
+    if !args.python.is_empty() {
+        let python = python_runtime::python_executable()
+            .context("Finding Python interpreter for --python flag")?;
+        let user_site = python_runtime::user_site_packages();
+        let status = std::process::Command::new(&python)
+            .args(&args.python)
+            .env("PYTHONPATH", &user_site)
+            .status()
+            .with_context(|| format!("Failed to run Python: {:?}", python))?;
+        std::process::exit(status.code().unwrap_or(1));
     }
 
     // Set custom data directory before any path operations

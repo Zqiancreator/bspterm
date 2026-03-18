@@ -1,0 +1,107 @@
+use std::path::PathBuf;
+use std::process::Stdio;
+
+const PYTHON_CANDIDATES: &[&str] = &["python3", "python", "py"];
+
+/// Returns the path to the bundled Python executable, if it exists.
+///
+/// Looks relative to the current executable:
+/// - Linux: `<exe_dir>/../lib/python/bin/python3.11`
+/// - Windows: `<exe_dir>/../python/python.exe`
+pub fn bundled_python_executable() -> Option<PathBuf> {
+    let exe_path = std::env::current_exe().ok()?;
+    let exe_dir = exe_path.parent()?;
+
+    #[cfg(unix)]
+    let candidate = exe_dir.join("../lib/python/bin/python3.11");
+
+    #[cfg(windows)]
+    let candidate = exe_dir.join("../python/python.exe");
+
+    let candidate = candidate.canonicalize().ok()?;
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Returns the path to a Python executable.
+///
+/// Tries the bundled Python first, then falls back to system PATH
+/// (python3, python, py). Validates each candidate by running a simple
+/// arithmetic check.
+#[allow(clippy::disallowed_methods)]
+pub fn python_executable() -> anyhow::Result<PathBuf> {
+    if let Some(bundled) = bundled_python_executable() {
+        log::info!("[python-runtime] Using bundled Python: {:?}", bundled);
+        return Ok(bundled);
+    }
+
+    for candidate in PYTHON_CANDIDATES {
+        let Ok(path) = which::which(candidate) else {
+            continue;
+        };
+
+        let Ok(output) = std::process::Command::new(&path)
+            .args(["-c", "print(1 + 2)"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+
+        if output.stdout.trim_ascii() != b"3" {
+            continue;
+        }
+
+        log::info!("[python-runtime] Using system Python: {:?}", path);
+        return Ok(path);
+    }
+
+    anyhow::bail!(
+        "Python not found. Tried bundled Python and system PATH candidates: {}. \
+         Please install Python and ensure it is in your PATH.",
+        PYTHON_CANDIDATES.join(", ")
+    )
+}
+
+/// Returns the path to the user site-packages directory.
+///
+/// - Linux: `~/.config/bspterm/python/site-packages/`
+/// - Windows: `%LOCALAPPDATA%/Bspterm/python/site-packages/`
+pub fn user_site_packages() -> PathBuf {
+    #[cfg(unix)]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            PathBuf::from(home)
+                .join(".config/bspterm/python/site-packages")
+        } else {
+            PathBuf::from("/tmp/bspterm/python/site-packages")
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            PathBuf::from(local_app_data)
+                .join("Bspterm/python/site-packages")
+        } else {
+            PathBuf::from("C:/Bspterm/python/site-packages")
+        }
+    }
+}
+
+/// Creates the user site-packages directory if it doesn't exist and returns its path.
+pub fn ensure_user_site_packages() -> anyhow::Result<PathBuf> {
+    let path = user_site_packages();
+    if !path.exists() {
+        std::fs::create_dir_all(&path)?;
+        log::info!(
+            "[python-runtime] Created user site-packages directory: {:?}",
+            path
+        );
+    }
+    Ok(path)
+}

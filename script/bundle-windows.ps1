@@ -225,6 +225,15 @@ function DownloadConpty {
     Expand-Archive -Path $zipPath -DestinationPath ".\conpty" -Force
 }
 
+function BundlePython {
+    Write-Output "Bundling Python 3.11..."
+    if (-not (Test-Path "target/python-dist")) {
+        & "$PSScriptRoot/bundle-python.ps1"
+    }
+    New-Item -ItemType Directory -Path "$innoDir/python" -Force | Out-Null
+    Copy-Item -Recurse "target/python-dist/*" "$innoDir/python/" -Force
+}
+
 function CollectFiles {
     Move-Item -Path "$innoDir\zed_explorer_command_injector.appx" -Destination "$innoDir\appx\zed_explorer_command_injector.appx" -Force
     Move-Item -Path "$innoDir\zed_explorer_command_injector.dll" -Destination "$innoDir\appx\zed_explorer_command_injector.dll" -Force
@@ -369,6 +378,7 @@ CheckEnvironmentVariables
 PrepareForBundle
 GenerateLicenses
 BuildZedAndItsFriends
+BundlePython
 BuildRemoteServer
 MakeAppx
 SignZedAndItsFriends

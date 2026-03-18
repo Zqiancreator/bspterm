@@ -2998,6 +2998,7 @@ dependencies = [
  "parking_lot",
  "paths",
  "plist",
+ "python_runtime",
  "rayon",
  "release_channel",
  "serde",
@@ -12408,6 +12409,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "python_runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "which 6.0.3",
+]
+
+[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13974,12 +13984,12 @@ dependencies = [
  "log",
  "parking_lot",
  "paths",
+ "python_runtime",
  "serde",
  "terminal_scripting",
  "ui",
  "util",
  "uuid",
- "which 6.0.3",
  "windows 0.61.3",
  "workspace",
 ]

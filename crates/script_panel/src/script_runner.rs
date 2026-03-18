@@ -27,37 +27,6 @@ pub struct ScriptRunner {
     status: ScriptStatus,
 }
 
-const PYTHON_CANDIDATES: &[&str] = &["python3", "python", "py"];
-
-#[allow(clippy::disallowed_methods)]
-pub fn find_python_executable() -> anyhow::Result<PathBuf> {
-    for candidate in PYTHON_CANDIDATES {
-        let Ok(path) = which::which(candidate) else {
-            continue;
-        };
-
-        let Ok(output) = new_std_command(&path)
-            .args(["-c", "print(1 + 2)"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-        else {
-            continue;
-        };
-
-        if output.stdout.trim_ascii() != b"3" {
-            continue;
-        }
-
-        return Ok(path);
-    }
-
-    anyhow::bail!(
-        "Python not found. Tried: {}. Please install Python and ensure it is in your PATH.",
-        PYTHON_CANDIDATES.join(", ")
-    )
-}
-
 impl ScriptRunner {
     pub fn new(
         script_path: PathBuf,
@@ -85,7 +54,7 @@ impl ScriptRunner {
 
     #[allow(clippy::disallowed_methods)]
     pub fn start(&mut self) -> anyhow::Result<()> {
-        let python = find_python_executable()?;
+        let python = python_runtime::python_executable()?;
 
         log::info!(
             "[script-runner] Starting script: path={:?}, python={:?}, connection={}",
@@ -100,11 +69,20 @@ impl ScriptRunner {
             .map(|p| p.join("bspterm.py"))
             .unwrap_or_else(|| PathBuf::from("bspterm.py"));
 
+        let scripts_dir = bspterm_path
+            .parent()
+            .unwrap_or(&PathBuf::from("."))
+            .to_path_buf();
+        let user_site = python_runtime::user_site_packages();
+
+        let python_path = std::env::join_paths([&scripts_dir, &user_site])
+            .unwrap_or_else(|_| scripts_dir.as_os_str().to_os_string());
+
         let mut command = new_std_command(&python);
         command
             .arg(&self.script_path)
             .env("BSPTERM_SOCKET", &self.connection_string)
-            .env("PYTHONPATH", bspterm_path.parent().unwrap_or(&PathBuf::from(".")))
+            .env("PYTHONPATH", python_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
