@@ -87,6 +87,13 @@ impl ScriptRunner {
     pub fn start(&mut self) -> anyhow::Result<()> {
         let python = find_python_executable()?;
 
+        log::info!(
+            "[script-runner] Starting script: path={:?}, python={:?}, connection={}",
+            self.script_path,
+            python,
+            self.connection_string,
+        );
+
         let bspterm_path = self
             .script_path
             .parent()
@@ -110,6 +117,11 @@ impl ScriptRunner {
         }
 
         let child = command.spawn()?;
+
+        log::info!(
+            "[script-runner] Process spawned with pid={}",
+            child.id(),
+        );
 
         #[cfg(unix)]
         {
@@ -141,11 +153,42 @@ impl ScriptRunner {
         if let Some(child) = &mut self.process {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    self.status = ScriptStatus::Finished(status.code().unwrap_or(-1));
+                    let exit_code = status.code().unwrap_or(-1);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::process::ExitStatusExt;
+                        if let Some(signal) = status.signal() {
+                            log::warn!(
+                                "[script-runner] Process killed by signal {} (script: {:?})",
+                                signal,
+                                self.script_path,
+                            );
+                        } else {
+                            log::info!(
+                                "[script-runner] Process exited with code {} (script: {:?})",
+                                exit_code,
+                                self.script_path,
+                            );
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        log::info!(
+                            "[script-runner] Process exited with code {} (script: {:?})",
+                            exit_code,
+                            self.script_path,
+                        );
+                    }
+                    self.status = ScriptStatus::Finished(exit_code);
                     self.process = None;
                 }
                 Ok(None) => {}
                 Err(e) => {
+                    log::error!(
+                        "[script-runner] Failed to check process status: {} (script: {:?})",
+                        e,
+                        self.script_path,
+                    );
                     self.status = ScriptStatus::Failed(e.to_string());
                     self.process = None;
                 }
@@ -167,7 +210,10 @@ impl ScriptRunner {
                         Ok(0) => break,
                         Ok(n) => output.push_str(&String::from_utf8_lossy(&buf[..n])),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(_) => break,
+                        Err(e) => {
+                            log::warn!("[script-runner] stdout read error: {}", e);
+                            break;
+                        }
                     }
                 }
             }
@@ -179,7 +225,10 @@ impl ScriptRunner {
                         Ok(0) => break,
                         Ok(n) => output.push_str(&String::from_utf8_lossy(&buf[..n])),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(_) => break,
+                        Err(e) => {
+                            log::warn!("[script-runner] stderr read error: {}", e);
+                            break;
+                        }
                     }
                 }
             }

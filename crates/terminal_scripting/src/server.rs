@@ -11,6 +11,7 @@ use parking_lot::RwLock;
 use smol::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use crate::handlers::handle_request;
@@ -260,7 +261,35 @@ impl ScriptingServer {
             log::debug!("[scripting] Received request: {}", line.trim());
             let request_start = std::time::Instant::now();
 
-            let response = Self::process_message(&line, cx).await;
+            let response = match AssertUnwindSafe(Self::process_message(&line, cx))
+                .catch_unwind()
+                .await
+            {
+                Ok(response) => response,
+                Err(panic_payload) => {
+                    let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    log::error!(
+                        "[scripting] Handler panicked: {} (request: {})",
+                        panic_msg,
+                        line.trim()
+                    );
+                    // Extract request id for the error response
+                    let request_id = serde_json::from_str::<serde_json::Value>(&line)
+                        .ok()
+                        .and_then(|v| v.get("id").cloned())
+                        .unwrap_or(serde_json::Value::Null);
+                    JsonRpcResponse::error(
+                        request_id,
+                        JsonRpcError::internal_error(format!("Internal error: handler panicked: {}", panic_msg)),
+                    )
+                }
+            };
 
             log::debug!(
                 "[scripting] Request processed in {:?}",

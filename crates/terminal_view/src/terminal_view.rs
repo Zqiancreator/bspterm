@@ -315,6 +315,7 @@ pub struct TerminalView {
     scripting_id: Option<uuid::Uuid>,
     button_bar_runner: Option<ButtonBarScriptRunner>,
     function_runner: Option<ButtonBarScriptRunner>,
+    _script_poll_task: Option<Task<()>>,
     _button_bar_subscription: Option<Subscription>,
     _function_store_subscription: Option<Subscription>,
     /// Currently selected button for context menu operations (button_id, script_path)
@@ -535,6 +536,7 @@ impl TerminalView {
             scripting_id,
             button_bar_runner: None,
             function_runner: None,
+            _script_poll_task: None,
             _button_bar_subscription: button_bar_subscription,
             _function_store_subscription: None,
             selected_button: None,
@@ -1557,6 +1559,7 @@ print(output)
             }
 
             self.button_bar_runner = Some(runner);
+            self.ensure_script_poll_task(cx);
             cx.notify();
         }
     }
@@ -1595,6 +1598,7 @@ print(output)
         }
 
         self.button_bar_runner = Some(runner);
+        self.ensure_script_poll_task(cx);
         cx.notify();
     }
 
@@ -1679,6 +1683,7 @@ print(output)
         );
 
         self.function_runner = Some(runner);
+        self.ensure_script_poll_task(cx);
         cx.notify();
     }
 
@@ -1800,7 +1805,35 @@ print(output)
         log::info!("Function '{}' started with env params", invocation.function_name);
 
         self.function_runner = Some(runner);
+        self.ensure_script_poll_task(cx);
         cx.notify();
+    }
+
+    fn ensure_script_poll_task(&mut self, cx: &mut Context<Self>) {
+        if self._script_poll_task.is_some() {
+            return;
+        }
+        self._script_poll_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(200))
+                    .await;
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        this.update_button_bar_runner(cx);
+                        this.update_function_runner(cx);
+                        this.button_bar_runner.is_some() || this.function_runner.is_some()
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+            this.update(cx, |this, _cx| {
+                this._script_poll_task = None;
+            })
+            .ok();
+        }));
     }
 
     fn update_button_bar_runner(&mut self, cx: &mut Context<Self>) {
@@ -2482,6 +2515,7 @@ print(output)
             shortcut.keybinding
         );
         self.button_bar_runner = Some(runner);
+        self.ensure_script_poll_task(cx);
         cx.notify();
     }
 
@@ -4090,10 +4124,6 @@ impl Render for TerminalView {
                 }
             });
         }
-
-        // Update button bar runner status and log output
-        self.update_button_bar_runner(cx);
-        self.update_function_runner(cx);
 
         let terminal_handle = self.terminal.clone();
         let terminal_view_handle = cx.entity();

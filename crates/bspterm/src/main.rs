@@ -175,6 +175,14 @@ fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
 static STARTUP_TIME: OnceLock<Instant> = OnceLock::new();
 
 fn main() {
+    // Ignore SIGPIPE to prevent silent crashes when writing to broken pipes/sockets
+    // (e.g., when a Python script process exits and bspterm tries to write to the socket).
+    // Must be set before crash handler installs its own signal handlers.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     STARTUP_TIME.get_or_init(|| Instant::now());
 
     #[cfg(unix)]
