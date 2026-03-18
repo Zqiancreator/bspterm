@@ -1,6 +1,6 @@
 # rule_editor
 
-Panel for managing terminal automation rules (auto-login, pattern-based actions).
+Panel for managing terminal automation rules (auto-login, pattern-based actions) with context-aware matching.
 
 ## Module Structure
 
@@ -49,4 +49,5 @@ cargo test -p rule_editor
 - Trigger selector uses button group (Wakeup, Connected, Disconnected)
 - Protocol selector uses button group (SSH, Telnet)
 - Condition pattern supports case-sensitivity toggle
+- Context exclusion UI: toggle to enable `exclude_context`, pattern text input, `lines_before` count, case-insensitive toggle. Maps to `ContextExclusion` in `rule_store.rs`.
 - Panel docks on Right side by default (priority: 11)

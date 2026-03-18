@@ -46,6 +46,7 @@ src/
 | `SessionConfig` | SSH/Telnet configuration with auth methods |
 | `RuleStore` / `RuleEngine` | Automation rules with pattern matching |
 | `AutomationRule` | Trigger + condition + action definition |
+| `ContextExclusion` | Context-aware rule exclusion (pattern/case_insensitive/lines_before) |
 | `RecognizeConfig` / `RecognizeConfigEntity` | Quick Add auto-recognition rules (version-aware defaults) |
 | `FunctionStore` | Function bar configurations with protocol filtering (Script + Abbreviation kinds) |
 | `FunctionKind` | Enum: `Script` (default) or `Abbreviation { trigger, expansion }` |
@@ -77,6 +78,13 @@ src/
 1. Add variant to `Event` enum in `terminal.rs`
 2. Emit via `cx.emit()` at appropriate location
 
+**Absolute line addressing:**
+- `total_lines_scrolled: i64` — cumulative scroll offset for stable line references
+- `grid_line_to_absolute(grid_line) -> i64` — convert grid-relative to absolute
+- `absolute_to_grid_line(absolute_line) -> i32` — convert absolute to grid-relative
+- `scroll_to_line(absolute_line)` — scroll viewport to an absolute line
+- `command_history.rs` uses `i64` absolute lines (no more `adjust_for_scroll()`)
+
 **Add a new config store:**
 1. Define item type implementing `ConfigItem` (needs `fn id(&self) -> Uuid`)
 2. Define store struct implementing `JsonConfigStore` (provide `items()`, `items_mut()`, `new_empty()`)
@@ -99,3 +107,4 @@ cargo test -p terminal rule_engine  # Rule engine tests
 - Protocol negotiation (Telnet IAC) must be handled before passing data to Term
 - Session store auto-saves on changes - avoid unnecessary mutations
 - `recognize_config.json` is only overwritten when its version is older than the app's embedded version
+- Context exclusion patterns (`ContextExclusion`) are pre-compiled at rule load time — editing `exclude_context` requires re-compiling the regex

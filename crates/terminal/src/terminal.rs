@@ -2439,11 +2439,6 @@ impl Terminal {
         let delta = clamped_offset - current_display_offset;
         drop(term);
 
-        log::info!(
-            "[outline-debug] scroll_to_line: absolute_line={}, grid_line={}, current_display_offset={}, new_display_offset={}, history_size={}, clamped_offset={}, delta={}",
-            absolute_line, grid_line, current_display_offset, new_display_offset, history_size, clamped_offset, delta,
-        );
-
         if delta != 0 {
             self.events
                 .push_back(InternalEvent::Scroll(AlacScroll::Delta(delta)));
@@ -2452,7 +2447,6 @@ impl Terminal {
 
     pub fn set_highlighted_line(&mut self, line: i64) {
         self.highlighted_line = Some(line);
-        log::info!("[outline-debug] set_highlighted_line: absolute_line={}", line);
     }
 
     pub fn clear_highlighted_line(&mut self) {
@@ -2749,18 +2743,6 @@ impl Terminal {
                         absolute_line,
                         Local::now(),
                     );
-                    {
-                        let term = self.term.lock();
-                        log::info!(
-                            "[outline-debug] command recorded: command={:?}, absolute_line={}, topmost_line={}, total_lines_scrolled={}, history_size={}, display_offset={}",
-                            command.trim(),
-                            absolute_line,
-                            term.topmost_line().0,
-                            self.total_lines_scrolled,
-                            term.history_size(),
-                            self.last_content.display_offset,
-                        );
-                    }
                     cx.emit(Event::CommandHistoryChanged);
                 }
             }
@@ -3592,10 +3574,6 @@ impl Terminal {
         // Detect scrolling: topmost_line becoming more negative means content scrolled up
         let scroll_delta = self.last_topmost_line - topmost_line;
         if scroll_delta > 0 {
-            log::info!(
-                "[outline-debug] scroll detected: scroll_delta={}, topmost_line={}, last_topmost_line={}, total_lines_scrolled={}",
-                scroll_delta, topmost_line, self.last_topmost_line, self.total_lines_scrolled,
-            );
             // Track total lines scrolled for absolute line number computation
             self.total_lines_scrolled += scroll_delta as i64;
             // Content scrolled up by scroll_delta lines, adjust all timestamp keys

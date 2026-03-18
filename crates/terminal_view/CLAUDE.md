@@ -90,6 +90,22 @@ When `group_tabs_by_session` setting is enabled, tabs are grouped by session in 
 - Exported buffers inherit the source terminal's group via `register_item_group()`
 - Falls back to `Pane::render_tab_bar` when no groups exist
 
+## Word Highlight (VSCode-style)
+
+Four scenarios for highlighting matching text in the terminal:
+
+1. **Select text → temporary highlight** of all matching occurrences in viewport
+2. **Select text → right-click "Highlight"** → persistent highlight with 8-color rotation
+3. **Click a word → temporary highlight** of matching words in viewport
+4. **Right-click word → "Highlight"** → persistent highlight
+
+Key implementation:
+- `terminal.rs`: `WordHighlight` struct (text + color_index), `find_word_at_grid_point()`
+- `terminal_element.rs`: `find_visible_occurrences()` scans visible rows for matches
+- `terminal_view.rs`: `HighlightWord` / `ClearWordHighlights` actions
+- Persistent highlights use `word_highlight_colors()` 8-color rotation, NOT saved across restart
+- Word boundaries use `semantic_escape_chars`
+
 ## Testing
 
 ```sh

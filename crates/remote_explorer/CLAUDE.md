@@ -27,6 +27,8 @@ src/
 | `QuickAddArea` | Container for auto-recognize and forms |
 | `GroupEditModal` | Modal for group management |
 | `SessionEditModal` | Modal for session editing |
+| `SessionEditModal::new_create_ssh()` | Factory for SSH creation (default port 22) |
+| `SessionEditModal::new_create_telnet()` | Factory for Telnet creation (default port 23) |
 | `AutoRecognizeSection` | Flexible connection string parser |
 | `TokenType` | Ip/Port/Username/Password/Label classification |
 | `DraggedSessionEntry` | Drag-drop data |
@@ -68,7 +70,6 @@ All quick-add sessions are automatically placed in a group named after the IP ad
 - `workspace` - Panel, ModalView, DockPosition
 - `editor` - Text input editors
 - `ui` - ListItem, ContextMenu, Button, Icon
-- `lan_discovery` - Online user detection
 
 ## Common Tasks
 
@@ -104,6 +105,7 @@ cargo test -p remote_explorer
 - Title bar has single toggle button (`ToggleCollapseAll` action) that switches between collapse/expand based on current state
 - `has_any_expanded_group()` checks if any group is expanded to determine toggle behavior
 - Title bar toggle button uses VSCode-style dynamic icons: `CollapseAll` (minus) when expanded, `ExpandAll` (plus) when collapsed
+- Session names are auto-generated based on host:port when not explicitly provided
 
 ## Adding New Icons
 

@@ -36,6 +36,7 @@ Fork of [Zed](https://github.com/zed-industries/zed), a GPU-accelerated code edi
 - **rule_editor** (`crates/rule_editor`): Terminal automation rules panel
 - **highlight_editor** (`crates/highlight_editor`): Terminal highlighting rules panel
 - **log_tracer** (`crates/log_tracer`): Terminal log analysis, Docker code search, call graphs
+- **command_panel** (`crates/command_panel`): Command send panel with per-terminal persistence, cycle send
 - **call_graph_panel** (`crates/call_graph_panel`): Call graph visualization
 
 ## Rust Coding Guidelines
@@ -168,7 +169,7 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Keybinding Interception**: `send_keybindings_to_shell` in `terminal_view.rs` — intercepts Terminal-context bindings, skip list for Bspterm-only keys
 - **Grouped Tab Bar**: `group_tabs_by_session` in `terminal_panel.rs` — groups tabs by session UUID, supports drag-based group reassignment
 - **Gutter**: `terminal_element.rs` + `row_decorator.rs` — line numbers, timestamps, relative line numbers, logic line numbers (wrapped lines share one number)
-- **Remote Explorer**: `crates/remote_explorer` — session tree with Quick Add (`src/quick_add/`), filter by name/tags/host/username (auto-expands groups when filtering)
+- **Remote Explorer**: `crates/remote_explorer` — session tree with Quick Add (`src/quick_add/`), filter by name/tags/host/username (auto-expands groups when filtering). Protocol-specific creation: `SessionEditModal::new_create_ssh()` / `new_create_telnet()` with default ports (22/23).
 - **Reconnection**: Preserves scrollback by reusing `Terminal` entity and `events_tx` — `Term` buffer is never replaced
 - **Editor Panel**: `crates/editor_panel` — dockable editor wrapping a `Pane`, auto-closes when empty
 - **Function Bar**: `function_store.rs` + `function_bar.rs` — custom buttons with parameter UI modal (string/number/boolean/choice/password types). Supports two kinds: **Script** (Python script execution) and **Abbreviation** (simple text expansion: trigger word → expansion text, e.g. "g" → "git"). Abbreviations are triggered by Space (expands and appends space) or Enter (expands and sends Enter). Both share the same store (`functions.json`), bar UI, and CRUD flow. `FunctionKind` enum (`Script` | `Abbreviation { trigger, expansion }`) is `#[serde(flatten)]` on `FunctionConfig` — backward compatible with existing JSON. Separate `abbreviation_enabled` toggle in store.
@@ -180,6 +181,8 @@ Persistent SSH/Telnet configs in `crates/terminal/src/session_store.rs`. Key typ
 - **Session Log Indicator**: Terminal tab shows log file path at bottom-right, Ctrl+Click opens in file manager
 - **Session Log Group Folders**: Log files are organized into subdirectories matching the session's group hierarchy from the session store tree (e.g., `session_logs/Production/Web Servers/20260312_host_22.log`). Group names are sanitized for filesystem safety. Sessions at root level log directly into `session_logs/`.
 - **Word Highlight (VSCode-style)**: `terminal.rs` (`WordHighlight`, `find_word_at_grid_point()`) + `terminal_element.rs` (`find_visible_occurrences()`) + `terminal_view.rs` (`HighlightWord`/`ClearWordHighlights` actions). Four scenarios: (1) select text → temporary highlight of all matching occurrences, (2) select text → right-click "Highlight" → persistent highlight, (3) click a word → temporary highlight of matching words, (4) right-click word → "Highlight" → persistent highlight. Persistent highlights use 8-color rotation (`word_highlight_colors()`), not saved across restart. Word boundaries use `semantic_escape_chars`.
+- **Per-Terminal Command Persistence**: `command_panel.rs` — each terminal retains its own command/cycle content and interval via `PerTerminalPersistConfig`. State restored on terminal focus switch, cleaned up on tab close.
+- **Absolute Line Tracking**: `terminal.rs` — `total_lines_scrolled` field for stable addressing; `grid_line_to_absolute()` / `absolute_to_grid_line()` / `scroll_to_line()` for stable line references across scrollback. `command_history.rs` uses `i64` absolute lines.
 
 ## Terminal Autosuggestion (Fish-style)
 
@@ -238,7 +241,9 @@ Python client: `assets/scripts/bspterm.py`. Scripts in `~/.config/bspterm/script
 
 ## Terminal Automation Rules
 
-Rule engine in `crates/terminal/src/rule_engine.rs` and `rule_store.rs`. Types: `AutomationRule`, `TriggerEvent` (Wakeup/Connected/Disconnected), `RuleCondition` (Pattern/ConnectionType/All/Any), `RuleAction` (SendText/SendCredential/RunPython/Sequence/Delay). Features: pre-compiled regex, 2s cooldown, `max_triggers`. Panel: `crates/rule_editor/`. Persistence: `~/.config/bspterm/terminal_rules.json`. Test: `cargo test -p terminal rule_engine`.
+Rule engine in `crates/terminal/src/rule_engine.rs` and `rule_store.rs`. Types: `AutomationRule`, `TriggerEvent` (Wakeup/Connected/Disconnected), `RuleCondition` (Pattern/ConnectionType/All/Any), `RuleAction` (SendText/SendCredential/RunPython/Sequence/Delay). Features: pre-compiled regex, 2s cooldown, `max_triggers`, context-aware exclusion. Panel: `crates/rule_editor/`. Persistence: `~/.config/bspterm/terminal_rules.json`. Test: `cargo test -p terminal rule_engine`.
+
+**Context Exclusion**: `ContextExclusion` (`exclude_context` field on `AutomationRule`) — skips rule action if a pattern matches in the preceding N lines. Fields: `pattern` (regex), `case_insensitive` (bool), `lines_before` (usize, default 5). Patterns are pre-compiled at rule load time.
 
 ## Terminal Semantic Highlighting
 

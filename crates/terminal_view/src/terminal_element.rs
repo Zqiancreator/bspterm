@@ -1808,11 +1808,6 @@ impl Element for TerminalElement {
                         .last_content
                         .terminal_bounds
                         .num_columns();
-                    log::info!(
-                        "[outline-debug] render highlight: absolute_line={}, grid_line={}, display_offset={}, relative_line={}, viewport_lines={}",
-                        highlighted_line, grid_line, display_offset, relative_line,
-                        self.terminal.read(cx).viewport_lines(),
-                    );
                     let highlight_color = gpui::hsla(210.0 / 360.0, 0.6, 0.5, 0.3);
                     let start =
                         AlacPoint::new(AlacLine(relative_line), AlacColumn(0));
