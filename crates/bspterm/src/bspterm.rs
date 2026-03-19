@@ -151,15 +151,6 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
-    // Warm up Python discovery cache on a background thread so script
-    // execution is instant when the user triggers it later.
-    cx.background_spawn(async {
-        if let Err(error) = python_runtime::python_executable() {
-            log::warn!("[python-runtime] Python not found at startup: {}", error);
-        }
-    })
-    .detach();
-
     #[cfg(target_os = "macos")]
     cx.on_action(|_: &Hide, cx| cx.hide());
     #[cfg(target_os = "macos")]

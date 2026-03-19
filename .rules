@@ -240,21 +240,17 @@ Methods: `session.current`, `session.list`, `session.create_ssh`, `session.creat
 
 Python client: `assets/scripts/bspterm.py`. Scripts in `~/.config/bspterm/scripts/*.py`. Scripts can declare `@params` blocks in docstrings for modal parameter input (types: string, number, boolean, choice, password). See `crates/script_panel/src/script_params.rs`.
 
-## Bundled Python Runtime
+## Python Runtime
 
-`crates/python_runtime/` manages Python interpreter discovery. Bundled CPython 3.11 from [python-build-standalone](https://github.com/indygreg/python-build-standalone) ships with release builds; dev builds fall back to system Python.
+`crates/python_runtime/` manages Python interpreter discovery via system PATH.
 
-**Discovery order** (`python_runtime::python_executable()`):
-1. Bundled Python (relative to exe): Linux `<exe_dir>/../lib/python/bin/python3.11`, Windows `<exe_dir>/../python/python.exe`
-2. System PATH fallback: `python3` → `python` → `py` (validated with `print(1 + 2)` check)
+**Discovery** (`python_runtime::python_executable()`): System PATH candidates `python3` → `python` → `py` (validated with `print(1 + 2)` check). Result cached in `OnceLock`.
 
 **User site-packages** (`python_runtime::user_site_packages()`): `~/.config/bspterm/python/site-packages/` (Linux), `%LOCALAPPDATA%/Bspterm/python/site-packages/` (Windows). Added to `PYTHONPATH` when running scripts.
 
-**CLI flag**: `bspterm --python <args>` forwards to the bundled/system Python. Use for pip: `bspterm --python -m pip install paramiko`
+**CLI flag**: `bspterm --python <args>` forwards to system Python. Use for pip: `bspterm --python -m pip install paramiko`
 
-**pip 配置**: 使用标准 pip 用户级配置文件（`~/.config/pip/pip.conf` / `%APPDATA%\pip\pip.ini`），bundled Python 与系统 Python 共享同一配置。换源：`bspterm --python -m pip config set global.index-url <url>`
-
-**Bundle scripts**: `script/bundle-python` (Linux) / `script/bundle-python.ps1` (Windows) — download and strip CPython distribution (~18-22MB after stripping test/idle/tkinter).
+**pip 配置**: 使用标准 pip 用户级配置文件（`~/.config/pip/pip.conf` / `%APPDATA%\pip\pip.ini`）。换源：`bspterm --python -m pip config set global.index-url <url>`
 
 ## Terminal Automation Rules
 

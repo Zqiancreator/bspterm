@@ -8,35 +8,11 @@ const PYTHON_CANDIDATES: &[&str] = &["python3", "python", "py"];
 
 static PYTHON_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// Returns the path to the bundled Python executable, if it exists.
-///
-/// Looks relative to the current executable:
-/// - Linux: `<exe_dir>/../lib/python/bin/python3.11`
-/// - Windows: `<exe_dir>/../python/python.exe`
-pub fn bundled_python_executable() -> Option<PathBuf> {
-    let exe_path = std::env::current_exe().ok()?;
-    let exe_dir = exe_path.parent()?;
-
-    #[cfg(unix)]
-    let candidate = exe_dir.join("../lib/python/bin/python3.11");
-
-    #[cfg(windows)]
-    let candidate = exe_dir.join("../python/python.exe");
-
-    let candidate = candidate.canonicalize().ok()?;
-    if candidate.exists() {
-        Some(candidate)
-    } else {
-        None
-    }
-}
-
 /// Returns the path to a Python executable (cached after first successful discovery).
 ///
-/// Tries the bundled Python first, then falls back to system PATH
-/// (python3, python, py). Validates each candidate by running a simple
-/// arithmetic check. The result is cached in a `OnceLock` so subsequent
-/// calls return instantly.
+/// Searches system PATH for python3, python, or py. Validates each candidate
+/// by running a simple arithmetic check. The result is cached in a `OnceLock`
+/// so subsequent calls return instantly.
 pub fn python_executable() -> anyhow::Result<PathBuf> {
     if let Some(cached) = PYTHON_PATH.get() {
         return Ok(cached.clone());
@@ -50,11 +26,6 @@ pub fn python_executable() -> anyhow::Result<PathBuf> {
 
 #[allow(clippy::disallowed_methods)]
 fn find_python_executable() -> anyhow::Result<PathBuf> {
-    if let Some(bundled) = bundled_python_executable() {
-        log::info!("[python-runtime] Using bundled Python: {:?}", bundled);
-        return Ok(bundled);
-    }
-
     for candidate in PYTHON_CANDIDATES {
         let Ok(path) = which::which(candidate) else {
             continue;
@@ -89,7 +60,7 @@ fn find_python_executable() -> anyhow::Result<PathBuf> {
     }
 
     anyhow::bail!(
-        "Python not found. Tried bundled Python and system PATH candidates: {}. \
+        "Python not found. Tried system PATH candidates: {}. \
          Please install Python and ensure it is in your PATH.",
         PYTHON_CANDIDATES.join(", ")
     )

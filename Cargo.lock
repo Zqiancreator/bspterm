@@ -2327,7 +2327,6 @@ dependencies = [
  "project_symbols",
  "prompt_store",
  "proto",
- "python_runtime",
  "rayon",
  "recent_projects",
  "release_channel",
