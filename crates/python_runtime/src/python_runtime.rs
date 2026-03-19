@@ -1,7 +1,12 @@
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::path::Path;
 use std::process::Stdio;
+use std::sync::OnceLock;
 
 const PYTHON_CANDIDATES: &[&str] = &["python3", "python", "py"];
+
+static PYTHON_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Returns the path to the bundled Python executable, if it exists.
 ///
@@ -26,13 +31,25 @@ pub fn bundled_python_executable() -> Option<PathBuf> {
     }
 }
 
-/// Returns the path to a Python executable.
+/// Returns the path to a Python executable (cached after first successful discovery).
 ///
 /// Tries the bundled Python first, then falls back to system PATH
 /// (python3, python, py). Validates each candidate by running a simple
-/// arithmetic check.
-#[allow(clippy::disallowed_methods)]
+/// arithmetic check. The result is cached in a `OnceLock` so subsequent
+/// calls return instantly.
 pub fn python_executable() -> anyhow::Result<PathBuf> {
+    if let Some(cached) = PYTHON_PATH.get() {
+        return Ok(cached.clone());
+    }
+
+    let path = find_python_executable()?;
+    // Another thread may have raced us; that's fine — just return our result.
+    let _ = PYTHON_PATH.set(path.clone());
+    Ok(path)
+}
+
+#[allow(clippy::disallowed_methods)]
+fn find_python_executable() -> anyhow::Result<PathBuf> {
     if let Some(bundled) = bundled_python_executable() {
         log::info!("[python-runtime] Using bundled Python: {:?}", bundled);
         return Ok(bundled);
@@ -42,6 +59,17 @@ pub fn python_executable() -> anyhow::Result<PathBuf> {
         let Ok(path) = which::which(candidate) else {
             continue;
         };
+
+        // Skip Microsoft Store App Execution Aliases on Windows.
+        // These are stubs that either open the Store or run a sandboxed Python.
+        #[cfg(windows)]
+        if is_windows_store_python(&path) {
+            log::info!(
+                "[python-runtime] Skipping Microsoft Store Python: {:?}",
+                path
+            );
+            continue;
+        }
 
         let Ok(output) = std::process::Command::new(&path)
             .args(["-c", "print(1 + 2)"])
@@ -104,4 +132,13 @@ pub fn ensure_user_site_packages() -> anyhow::Result<PathBuf> {
         );
     }
     Ok(path)
+}
+
+/// Returns true if the path is a Microsoft Store App Execution Alias.
+/// These live under `%LOCALAPPDATA%\Microsoft\WindowsApps\`.
+#[cfg(windows)]
+fn is_windows_store_python(path: &Path) -> bool {
+    path.components().any(|component| {
+        component.as_os_str().eq_ignore_ascii_case("WindowsApps")
+    })
 }
