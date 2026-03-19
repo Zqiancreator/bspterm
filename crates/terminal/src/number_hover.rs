@@ -15,6 +15,7 @@ pub enum NumberFormat {
     Hexadecimal,
     Binary,
     Octal,
+    IPv4,
 }
 
 /// A parsed number with its original string representation and value.
@@ -116,6 +117,22 @@ impl ParsedNumber {
             format!("0o{:o}", self.value)
         }
     }
+
+    /// Format as IPv4 dotted-decimal notation.
+    /// Returns `Some("a.b.c.d")` only when `0 <= value <= 0xFFFF_FFFF`.
+    pub fn format_as_ipv4(&self) -> Option<String> {
+        if self.value < 0 || self.value > 0xFFFF_FFFF {
+            return None;
+        }
+        let v = self.value as u32;
+        Some(format!(
+            "{}.{}.{}.{}",
+            (v >> 24) & 0xFF,
+            (v >> 16) & 0xFF,
+            (v >> 8) & 0xFF,
+            v & 0xFF,
+        ))
+    }
 }
 
 
@@ -149,6 +166,28 @@ static OCT_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^0[oO][0-7][0-7_]*$").unwrap());
 static DEC_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^-?[0-9][0-9_]*$").unwrap());
+static IPV4_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap());
+
+/// Parse a dotted-decimal IPv4 string into a 32-bit value.
+fn parse_ipv4_string(s: &str) -> Option<i128> {
+    if !IPV4_REGEX.is_match(s) {
+        return None;
+    }
+    let octets: Vec<&str> = s.split('.').collect();
+    if octets.len() != 4 {
+        return None;
+    }
+    let mut value: u32 = 0;
+    for octet_str in &octets {
+        let octet: u32 = octet_str.parse().ok()?;
+        if octet > 255 {
+            return None;
+        }
+        value = (value << 8) | octet;
+    }
+    Some(value as i128)
+}
 
 /// Parse a string as a number if it matches any supported format.
 pub fn parse_number_string(s: &str) -> Option<(i128, NumberFormat)> {
@@ -181,6 +220,11 @@ pub fn parse_number_string(s: &str) -> Option<(i128, NumberFormat)> {
         }
     }
 
+    // Try IPv4
+    if let Some(value) = parse_ipv4_string(s) {
+        return Some((value, NumberFormat::IPv4));
+    }
+
     // Try decimal
     if DEC_REGEX.is_match(s) {
         let dec_str = s.replace('_', "");
@@ -197,7 +241,55 @@ fn is_number_char(c: char) -> bool {
     c.is_ascii_hexdigit() || c == 'x' || c == 'X' || c == 'b' || c == 'B' || c == 'o' || c == 'O' || c == '_' || c == '-'
 }
 
+/// Check if a character can be part of an IPv4 address.
+fn is_ipv4_char(c: char) -> bool {
+    c.is_ascii_digit() || c == '.'
+}
+
+/// Scan a word from the grid starting at `(line, col)`, expanding left and right
+/// while `char_predicate` holds. Returns `(start_col, end_col, extracted_string)`.
+fn scan_word_in_grid<T: EventListener>(
+    term: &Term<T>,
+    line: alacritty_terminal::index::Line,
+    col: usize,
+    char_predicate: fn(char) -> bool,
+) -> (usize, usize, String) {
+    let grid = term.grid();
+    let num_cols = grid.columns();
+
+    let mut start_col = col;
+    while start_col > 0 {
+        let prev_point = AlacPoint::new(line, Column(start_col - 1));
+        let prev_c = grid.index(prev_point).c;
+        if char_predicate(prev_c) {
+            start_col -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut end_col = col;
+    while end_col < num_cols - 1 {
+        let next_point = AlacPoint::new(line, Column(end_col + 1));
+        let next_c = grid.index(next_point).c;
+        if char_predicate(next_c) {
+            end_col += 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut word = String::with_capacity(end_col - start_col + 1);
+    for col_idx in start_col..=end_col {
+        let pt = AlacPoint::new(line, Column(col_idx));
+        word.push(grid.index(pt).c);
+    }
+
+    (start_col, end_col, word)
+}
+
 /// Find a number at the given terminal grid position.
+/// Uses two-pass scanning: first tries IPv4 (with `.`), then hex/bin/oct/dec (without `.`).
 pub fn find_number_at_position<T: EventListener>(
     term: &Term<T>,
     point: AlacPoint,
@@ -206,53 +298,38 @@ pub fn find_number_at_position<T: EventListener>(
     let line = point.line;
     let col = point.column;
 
-    // Check if we're on a valid character
     let cell = grid.index(point);
     let c = cell.c;
 
-    // Must be a character that can be part of a number (digits, hex letters, prefix chars, etc.)
+    // Pass 1: If clicked char is a digit, try IPv4 scan (includes `.`)
+    if c.is_ascii_digit() {
+        let (start_col, end_col, ipv4_str) =
+            scan_word_in_grid(term, line, col.0, is_ipv4_char);
+        if let Some((value, format)) = parse_number_string(&ipv4_str) {
+            if format == NumberFormat::IPv4 {
+                let word_match = AlacPoint::new(line, Column(start_col))
+                    ..=AlacPoint::new(line, Column(end_col));
+                return Some(ParsedNumber {
+                    original: ipv4_str,
+                    value,
+                    format,
+                    word_match,
+                });
+            }
+        }
+    }
+
+    // Pass 2: Standard number scan (without `.`)
     if !is_number_char(c) {
         return None;
     }
 
-    let num_cols = grid.columns();
+    let (start_col, end_col, number_str) =
+        scan_word_in_grid(term, line, col.0, is_number_char);
 
-    // Search left to find the start of the number
-    let mut start_col = col.0;
-    while start_col > 0 {
-        let prev_point = AlacPoint::new(line, Column(start_col - 1));
-        let prev_c = grid.index(prev_point).c;
-        if is_number_char(prev_c) || prev_c.is_ascii_digit() {
-            start_col -= 1;
-        } else {
-            break;
-        }
-    }
-
-    // Search right to find the end of the number
-    let mut end_col = col.0;
-    while end_col < num_cols - 1 {
-        let next_point = AlacPoint::new(line, Column(end_col + 1));
-        let next_c = grid.index(next_point).c;
-        if is_number_char(next_c) || next_c.is_ascii_digit() {
-            end_col += 1;
-        } else {
-            break;
-        }
-    }
-
-    // Extract the number string
-    let mut number_str = String::with_capacity(end_col - start_col + 1);
-    for col_idx in start_col..=end_col {
-        let pt = AlacPoint::new(line, Column(col_idx));
-        number_str.push(grid.index(pt).c);
-    }
-
-    // Try to parse the number
     if let Some((value, format)) = parse_number_string(&number_str) {
         let word_match = AlacPoint::new(line, Column(start_col))
             ..=AlacPoint::new(line, Column(end_col));
-
         return Some(ParsedNumber {
             original: number_str,
             value,
@@ -410,4 +487,66 @@ mod tests {
         assert_eq!(num.format_as_hex(), "0xFF");
     }
 
+    #[test]
+    fn test_parse_ipv4() {
+        assert_eq!(
+            parse_number_string("192.168.1.1"),
+            Some((0xC0A80101, NumberFormat::IPv4))
+        );
+        assert_eq!(
+            parse_number_string("0.0.0.0"),
+            Some((0, NumberFormat::IPv4))
+        );
+        assert_eq!(
+            parse_number_string("255.255.255.255"),
+            Some((0xFFFFFFFF, NumberFormat::IPv4))
+        );
+        assert_eq!(
+            parse_number_string("10.0.0.1"),
+            Some((0x0A000001, NumberFormat::IPv4))
+        );
+    }
+
+    #[test]
+    fn test_parse_invalid_ipv4() {
+        // Octet out of range
+        assert_ne!(
+            parse_number_string("192.168.1.256").map(|(_, f)| f),
+            Some(NumberFormat::IPv4)
+        );
+        // Not enough octets
+        assert_ne!(
+            parse_number_string("192.168.1").map(|(_, f)| f),
+            Some(NumberFormat::IPv4)
+        );
+        // Too many octets
+        assert_ne!(
+            parse_number_string("1.2.3.4.5").map(|(_, f)| f),
+            Some(NumberFormat::IPv4)
+        );
+        // Plain number should be decimal, not IPv4
+        assert_eq!(
+            parse_number_string("192").map(|(_, f)| f),
+            Some(NumberFormat::Decimal)
+        );
+    }
+
+    #[test]
+    fn test_format_as_ipv4() {
+        let make_num = |value: i128| ParsedNumber {
+            original: String::new(),
+            value,
+            format: NumberFormat::Decimal,
+            word_match: AlacPoint::new(alacritty_terminal::index::Line(0), Column(0))
+                ..=AlacPoint::new(alacritty_terminal::index::Line(0), Column(0)),
+        };
+
+        assert_eq!(make_num(0xC0A80101).format_as_ipv4(), Some("192.168.1.1".to_string()));
+        assert_eq!(make_num(0).format_as_ipv4(), Some("0.0.0.0".to_string()));
+        assert_eq!(make_num(0xFFFFFFFF).format_as_ipv4(), Some("255.255.255.255".to_string()));
+        // Negative values have no IPv4 representation
+        assert_eq!(make_num(-1).format_as_ipv4(), None);
+        // Values larger than u32 have no IPv4 representation
+        assert_eq!(make_num(0x1_0000_0000).format_as_ipv4(), None);
+    }
 }

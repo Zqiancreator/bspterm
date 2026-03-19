@@ -111,6 +111,7 @@ impl RenderOnce for NumberPopoverElement {
         let (binary_str, bit_positions) = parsed.format_as_binary();
         let decimal_str = parsed.format_as_decimal();
         let hex_str = parsed.format_as_hex();
+        let ipv4_str = parsed.format_as_ipv4();
 
         let pin_icon = IconName::Pin;
 
@@ -190,7 +191,12 @@ impl RenderOnce for NumberPopoverElement {
             .pt_1()
             .child(binary_row)
             .child(decimal_row)
-            .child(hex_row);
+            .child(hex_row)
+            .when_some(ipv4_str, |this, ipv4| {
+                this.child(Self::render_format_row(
+                    "IPv4", &ipv4, None, popover_id, "ipv4", cx,
+                ))
+            });
 
         let drag_data = NumberPopoverDrag {
             popover_id,
