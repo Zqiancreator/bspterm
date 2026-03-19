@@ -38,7 +38,7 @@
       "exclude_context": {
         "pattern": "(?i)(bootload|bootrom|boot\\s*menu|ftp)",
         "case_insensitive": true,
-        "lines_before": 5
+        "lines_before": 10
       }
     },
     {

@@ -91,7 +91,7 @@ pub struct ContextExclusion {
 }
 
 fn default_context_lines() -> usize {
-    5
+    10
 }
 
 /// An automation rule for terminal connections.
@@ -256,7 +256,7 @@ fn default_rules() -> Vec<AutomationRule> {
             exclude_context: Some(ContextExclusion {
                 pattern: r"(?i)(bootload|bootrom|boot\s*menu|ftp)".to_string(),
                 case_insensitive: true,
-                lines_before: 5,
+                lines_before: 10,
             }),
         },
         AutomationRule {

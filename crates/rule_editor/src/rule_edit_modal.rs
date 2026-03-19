@@ -89,7 +89,7 @@ impl RuleEditModal {
             append_newline: true,
             exclude_user_input: true,
             exclude_context_enabled: false,
-            exclude_context_lines: 5,
+            exclude_context_lines: 10,
             focus_handle,
         }
     }
@@ -128,7 +128,7 @@ impl RuleEditModal {
         let (exclude_context_enabled, exclude_context_pattern, exclude_context_lines) =
             match &rule.exclude_context {
                 Some(ctx) => (true, ctx.pattern.clone(), ctx.lines_before),
-                None => (false, String::new(), 5),
+                None => (false, String::new(), 10),
             };
 
         let exclude_context_pattern_editor = cx.new(|cx| {
