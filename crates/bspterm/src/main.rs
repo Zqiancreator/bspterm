@@ -269,6 +269,9 @@ fn main() {
     }
     ztracing::init();
 
+    #[cfg(target_os = "windows")]
+    migrate_windows_config();
+
     let version = option_env!("BSPTERM_BUILD_ID");
     let app_commit_sha =
         option_env!("BSPTERM_COMMIT_SHA").map(|commit_sha| AppCommitSha::new(commit_sha.to_string()));
@@ -1447,6 +1450,140 @@ fn init_paths() -> HashMap<io::ErrorKind, Vec<&'static Path>> {
 
 fn stdout_is_a_pty() -> bool {
     std::env::var(FORCE_CLI_MODE_ENV_VAR_NAME).ok().is_none() && io::stdout().is_terminal()
+}
+
+/// Migrate config files from the old location to the new one on Windows.
+///
+/// If HOME is set, the new config dir is `$HOME/.config/bspterm/` and the old is
+/// `%APPDATA%\Bspterm`. If HOME is not set, the new config dir is `%APPDATA%\Bspterm`
+/// and the old is `%USERPROFILE%/.config/bspterm/`.
+///
+/// Only copies files that don't exist at the destination. Does not delete the old directory.
+#[cfg(target_os = "windows")]
+fn migrate_windows_config() {
+    let current_config = paths::config_dir();
+
+    let old_config = if std::env::var("HOME").is_ok() {
+        // HOME is set: new location is $HOME/.config/bspterm/
+        // old location is %APPDATA%\Bspterm
+        dirs::config_dir().map(|dir| dir.join("Bspterm"))
+    } else {
+        // HOME is not set: new location is %APPDATA%\Bspterm
+        // old location is %USERPROFILE%/.config/bspterm/
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(|profile| PathBuf::from(profile).join(".config").join("bspterm"))
+    };
+
+    let Some(old_config) = old_config else {
+        log::info!("Windows config migration: cannot determine old config directory");
+        return;
+    };
+
+    if !old_config.exists() {
+        log::info!(
+            "Windows config migration: old directory {:?} does not exist, no migration needed",
+            old_config
+        );
+        return;
+    }
+
+    if old_config == *current_config {
+        return;
+    }
+
+    log::info!(
+        "Windows config migration: migrating from {:?} to {:?}",
+        old_config,
+        current_config
+    );
+
+    let mut migrated = 0u32;
+    let mut skipped = 0u32;
+
+    fn migrate_directory(
+        source: &Path,
+        destination: &Path,
+        migrated: &mut u32,
+        skipped: &mut u32,
+    ) {
+        let entries = match std::fs::read_dir(source) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log::warn!(
+                    "Windows config migration: failed to read directory {:?}: {}",
+                    source,
+                    error
+                );
+                return;
+            }
+        };
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    log::warn!(
+                        "Windows config migration: failed to read entry in {:?}: {}",
+                        source,
+                        error
+                    );
+                    continue;
+                }
+            };
+
+            let source_path = entry.path();
+            let file_name = entry.file_name();
+            let destination_path = destination.join(&file_name);
+
+            if source_path.is_dir() {
+                if !destination_path.exists() {
+                    if let Err(error) = std::fs::create_dir_all(&destination_path) {
+                        log::warn!(
+                            "Windows config migration: failed to create directory {:?}: {}",
+                            destination_path,
+                            error
+                        );
+                        continue;
+                    }
+                }
+                migrate_directory(&source_path, &destination_path, migrated, skipped);
+            } else if destination_path.exists() {
+                log::info!(
+                    "Windows config migration: skipping {:?} (already exists)",
+                    destination_path
+                );
+                *skipped += 1;
+            } else {
+                match std::fs::copy(&source_path, &destination_path) {
+                    Ok(_) => {
+                        log::info!(
+                            "Windows config migration: migrated {:?} -> {:?}",
+                            source_path,
+                            destination_path
+                        );
+                        *migrated += 1;
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Windows config migration: failed to copy {:?} -> {:?}: {}",
+                            source_path,
+                            destination_path,
+                            error
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    migrate_directory(&old_config, current_config, &mut migrated, &mut skipped);
+
+    log::info!(
+        "Windows config migration: completed. Migrated {} files, skipped {} files",
+        migrated,
+        skipped
+    );
 }
 
 #[derive(Parser, Debug)]

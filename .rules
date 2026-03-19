@@ -281,13 +281,61 @@ Common pattern via `crates/terminal/src/config_store.rs`: `ConfigItem` trait (`f
 
 **关键陷阱：只改 Rust 默认值不够。** `default.json` 在启动时被加载并合并到 settings 中，优先级高于 Rust `Default` impl。如果 `default.json` 中已有该字段的值，Rust 侧的改动完全无效。
 
+## 配置目录路径：禁止硬编码
+
+配置目录在不同平台/环境下路径不同，**任何需要向用户展示配置路径的地方都禁止硬编码 `~/.config/bspterm`**。
+
+**实际路径**（由 `paths::config_dir()` 决定）：
+- Linux/macOS: `~/.config/bspterm/`
+- Windows（设置了 HOME）: `%HOME%/.config/bspterm/`
+- Windows（未设置 HOME）: `%APPDATA%\Bspterm\`
+
+**正确做法：**
+
+| 场景 | 用法 |
+|------|------|
+| Rust 代码中获取配置路径 | `paths::config_dir()` 返回 `&'static PathBuf` |
+| UI/日志中显示给用户 | `paths::config_dir_display()` 返回平台感知的友好字符串 |
+| i18n 字符串中引用路径 | 用 `{}` 占位符，运行时 `.replace("{}", &paths::config_dir_display())` |
+| settings_content doc comments | 列出所有平台的路径变体 |
+| settings_ui placeholder | 使用 `SharedString::from(format!(..., paths::config_dir_display()))` |
+
+**反面示例（禁止）：**
+```rust
+// 错误：硬编码路径
+.child("Scripts directory empty, add scripts to ~/.config/bspterm/scripts/")
+placeholder: Some("~/.config/bspterm/session_logs"),
+```
+
+**正面示例：**
+```yaml
+# i18n YAML
+empty_hint: "Scripts directory empty, add scripts to {}/scripts/"
+```
+```rust
+// Rust 代码
+.child(t("function.empty_hint").replace("{}", &paths::config_dir_display()))
+placeholder: Some(SharedString::from(format!("{}/session_logs", paths::config_dir_display())))
+```
+
 ## Agent Connection Fallback
 
 `crates/agent_servers/` — connection modes: `auto` (ACP→Terminal fallback), `acp`, `terminal`, `prompt`. Config in `crates/settings_content/src/agent.rs` (`ConnectionMode` enum). Use `terminal` mode when agent outputs non-JSON to stdout.
 
 ## Base Keymap Configuration
 
-Two options in `crates/settings/src/base_keymap_setting.rs`: `VSCode` (default) and `None`. Keymap files: `assets/keymaps/default-{linux,macos,windows}.json`, `vim.json`, `initial.json`.
+Two options in `crates/settings/src/base_keymap_setting.rs`: `VSCode` (default) and `None`. Keymap files: `assets/keymaps/default-{linux,macos,windows}.json`, `vim.json`, `initial.json`。`storybook.json` 已删除。
+
+**快捷键已做激进清理**，只保留终端核心 + 基础编辑功能。修改快捷键时注意：
+
+* **三平台同步**：Linux/Windows/macOS 三个 keymap 文件必须同步修改（macOS 用 `cmd` 代替 `ctrl`，action 名相同）
+* **vim.json 不动**：vim 模式快捷键独立维护，不在清理范围内
+* **已删除的上下文块不要恢复**：以下上下文块已整体删除，新增快捷键不要使用这些上下文
+  - AI/Agent 相关：`AgentPanel`、`AgentDiff`、`ContextEditor`、`AcpThread`、`InlineAssistant`、`ThreadHistory`、`RulesLibrary`、`ZedPredictModal`、`ConfigureContextServerModal`、`ContextServerToolsModal`、`OnboardingAiConfigurationModal`
+  - Git Panel 相关：`GitPanel`、`GitPanel && ChangesList`、`GitPanel && CommitEditor`、`GitCommit > Editor`、`GitDiff > Editor`、`AskPass > Editor`、`CommitEditor > Editor`、`StashList`、`StashDiff > Editor`、`GitWorktreeSelector`、`GitBranchSelector`、`GitPicker`
+  - Zed 特有：`Onboarding`、`Welcome`、`RunModal`、`MultiProjectDropdown`、`NotebookEditor`、`RatePredictionsModal`
+  - 条件块：`Editor && jupyter`、`Editor && !agent_diff`、`Editor && editor_agent_diff`
+* **已删除的个别绑定**：`editor::ToggleBreakpoint`（debugger）、`agent::*`、`assistant::*`、`task::Rerun`/`task::Spawn`、`git_panel::ToggleFocus`、`debug_panel::ToggleFocus`、`zed::Extensions`、`branches::OpenRecent`、`workspace::FollowNextCollaborator`
 
 ## Windows 路径处理
 

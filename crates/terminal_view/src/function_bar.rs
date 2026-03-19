@@ -290,7 +290,7 @@ impl Render for FunctionBarConfigModal {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().colors().text_muted)
-                                .child(t("function.empty_hint")),
+                                .child(t("function.empty_hint").replace("{}", &paths::config_dir_display())),
                         )
                     })
                     .children(all_scripts.iter().map(|script| {

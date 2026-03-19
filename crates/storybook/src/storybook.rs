@@ -15,7 +15,7 @@ use gpui::{
 };
 use log::LevelFilter;
 use reqwest_client::ReqwestClient;
-use settings::{KeymapFile, Settings};
+use settings::Settings;
 use simplelog::SimpleLogger;
 use strum::IntoEnumIterator;
 use theme::ThemeSettings;
@@ -85,7 +85,6 @@ fn main() {
 
         editor::init(cx);
         init(cx);
-        load_storybook_keymap(cx);
         cx.set_menus(app_menus());
 
         let size = size(px(1500.), px(780.));
@@ -142,10 +141,6 @@ fn load_embedded_fonts(cx: &App) -> anyhow::Result<()> {
     }
 
     cx.text_system().add_fonts(embedded_fonts)
-}
-
-fn load_storybook_keymap(cx: &mut App) {
-    cx.bind_keys(KeymapFile::load_asset("keymaps/storybook.json", None, cx).unwrap());
 }
 
 pub fn init(cx: &mut App) {

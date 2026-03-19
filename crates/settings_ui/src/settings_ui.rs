@@ -380,7 +380,7 @@ impl Focusable for NonFocusableHandle {
 
 #[derive(Default)]
 struct SettingsFieldMetadata {
-    placeholder: Option<&'static str>,
+    placeholder: Option<SharedString>,
     should_do_titlecase: Option<bool>,
 }
 
@@ -3975,7 +3975,7 @@ fn render_text_field<T: From<String> + Into<String> + AsRef<str> + Clone>(
             editor.with_initial_text(text.as_ref().to_string())
         })
         .when_some(
-            metadata.and_then(|metadata| metadata.placeholder),
+            metadata.and_then(|metadata| metadata.placeholder.clone()),
             |editor, placeholder| editor.with_placeholder(placeholder),
         )
         .on_confirm({

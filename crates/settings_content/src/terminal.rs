@@ -218,9 +218,12 @@ pub struct TerminalSettingsContent {
     /// Default: notify
     pub device_online_action: Option<DeviceOnlineAction>,
     /// Path to the Python script to run when device_online_action is "run_script".
-    /// Relative paths are resolved from ~/.config/bspterm/scripts/
+    /// Relative paths are resolved from the scripts/ subdirectory under config dir.
+    /// Linux/macOS: ~/.config/bspterm/scripts/
+    /// Windows with HOME: %HOME%/.config/bspterm/scripts/
+    /// Windows without HOME: %APPDATA%\Bspterm\scripts\
     /// 当 device_online_action 为 "run_script" 时执行的 Python 脚本路径。
-    /// 相对路径从 ~/.config/bspterm/scripts/ 解析。
+    /// 相对路径从配置目录下的 scripts/ 子目录解析。
     pub device_online_script: Option<String>,
     /// SSH keepalive interval in seconds. Sends keepalive packets to detect
     /// disconnections from unresponsive servers (e.g., hardware power-off).
@@ -512,7 +515,10 @@ pub struct SessionLoggingContent {
     /// Directory where session logs are saved.
     /// Supports ~ expansion for home directory.
     ///
-    /// Default: "~/.config/bspterm/session_logs"
+    /// Default: config_dir/session_logs
+    /// (Linux/macOS: ~/.config/bspterm/session_logs,
+    ///  Windows with HOME: %HOME%/.config/bspterm/session_logs,
+    ///  Windows without HOME: %APPDATA%\Bspterm\session_logs)
     pub log_directory: Option<String>,
 
     /// Pattern for log file naming.

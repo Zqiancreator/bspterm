@@ -82,9 +82,14 @@ pub fn config_dir() -> &'static PathBuf {
         if let Some(custom_dir) = CUSTOM_DATA_DIR.get() {
             custom_dir.join("config")
         } else if cfg!(target_os = "windows") {
-            dirs::config_dir()
-                .expect("failed to determine RoamingAppData directory")
-                .join("Bspterm")
+            // Respect HOME env var (consistent with Git/SSH on Windows)
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home).join(".config").join("bspterm")
+            } else {
+                dirs::config_dir()
+                    .expect("failed to determine RoamingAppData directory")
+                    .join("Bspterm")
+            }
         } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             if let Ok(flatpak_xdg_config) = std::env::var("FLATPAK_XDG_CONFIG_HOME") {
                 flatpak_xdg_config.into()
@@ -96,6 +101,20 @@ pub fn config_dir() -> &'static PathBuf {
             home_dir().join(".config").join("bspterm")
         }
     })
+}
+
+/// Returns a user-friendly display string for the config directory path.
+/// Used in UI elements where the actual resolved path would be confusing.
+pub fn config_dir_display() -> String {
+    if cfg!(target_os = "windows") {
+        if std::env::var("HOME").is_ok() {
+            "~/.config/bspterm".to_string()
+        } else {
+            "%APPDATA%\\Bspterm".to_string()
+        }
+    } else {
+        "~/.config/bspterm".to_string()
+    }
 }
 
 /// Returns the path to the data directory used by Bspterm.

@@ -1,4 +1,4 @@
-use gpui::{Action as _, App};
+use gpui::{Action as _, App, SharedString};
 use itertools::Itertools as _;
 use settings::{LanguageSettingsContent, SemanticTokens, SettingsContent};
 use std::sync::{Arc, OnceLock};
@@ -92,7 +92,7 @@ fn general_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("Project Name"),
+                    placeholder: Some("Project Name".into()),
                     ..Default::default()
                 })),
             }),
@@ -6339,7 +6339,9 @@ fn terminal_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("~/.config/bspterm/session_logs"),
+                    placeholder: Some(SharedString::from(
+                        format!("{}/session_logs", paths::config_dir_display())
+                    )),
                     ..Default::default()
                 })),
             }),
@@ -6368,7 +6370,7 @@ fn terminal_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("${session_name}_%Y-%m-%d_%H.%M.%S_${weekday_cn}.log"),
+                    placeholder: Some("${session_name}_%Y-%m-%d_%H.%M.%S_${weekday_cn}.log".into()),
                     ..Default::default()
                 })),
             }),
@@ -6397,7 +6399,7 @@ fn terminal_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("[%Y-%m-%d %H:%M:%S] "),
+                    placeholder: Some("[%Y-%m-%d %H:%M:%S] ".into()),
                     ..Default::default()
                 })),
             }),
@@ -7312,7 +7314,7 @@ fn network_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("socks5h://localhost:10808"),
+                    placeholder: Some("socks5h://localhost:10808".into()),
                     ..Default::default()
                 })),
                 files: USER,
@@ -7328,7 +7330,7 @@ fn network_page() -> SettingsPage {
                     },
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("https://zed.dev"),
+                    placeholder: Some("https://zed.dev".into()),
                     ..Default::default()
                 })),
                 files: USER,

@@ -382,7 +382,7 @@ fn ollama_settings() -> Box<[SettingsPageItem]> {
                 json_path: Some("edit_predictions.ollama.api_url"),
             }),
             metadata: Some(Box::new(SettingsFieldMetadata {
-                placeholder: Some(OLLAMA_API_URL_PLACEHOLDER),
+                placeholder: Some(OLLAMA_API_URL_PLACEHOLDER.into()),
                 ..Default::default()
             })),
             files: USER,
@@ -415,7 +415,7 @@ fn ollama_settings() -> Box<[SettingsPageItem]> {
                 json_path: Some("edit_predictions.ollama.model"),
             }),
             metadata: Some(Box::new(SettingsFieldMetadata {
-                placeholder: Some(OLLAMA_MODEL_PLACEHOLDER),
+                placeholder: Some(OLLAMA_MODEL_PLACEHOLDER.into()),
                 ..Default::default()
             })),
             files: USER,
@@ -483,7 +483,7 @@ fn codestral_settings() -> Box<[SettingsPageItem]> {
                 json_path: Some("edit_predictions.codestral.api_url"),
             }),
             metadata: Some(Box::new(SettingsFieldMetadata {
-                placeholder: Some(CODESTRAL_API_URL),
+                placeholder: Some(CODESTRAL_API_URL.into()),
                 ..Default::default()
             })),
             files: USER,
@@ -546,7 +546,7 @@ fn codestral_settings() -> Box<[SettingsPageItem]> {
                 json_path: Some("edit_predictions.codestral.model"),
             }),
             metadata: Some(Box::new(SettingsFieldMetadata {
-                placeholder: Some("codestral-latest"),
+                placeholder: Some("codestral-latest".into()),
                 ..Default::default()
             })),
             files: USER,
