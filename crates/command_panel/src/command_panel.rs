@@ -1115,7 +1115,7 @@ impl CommandPanel {
                 .text_for_range(Point::new(row, 0)..Point::new(row, line_len))
                 .collect();
             if let Some(hash_pos) = line_text.find('#') {
-                let start_point = Point::new(row, hash_pos);
+                let start_point = Point::new(row, hash_pos.try_into().unwrap());
                 let end_point = Point::new(row, line_len);
                 let start = snapshot.anchor_before(start_point);
                 let end = snapshot.anchor_after(end_point);
